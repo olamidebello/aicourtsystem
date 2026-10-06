@@ -1,0 +1,63 @@
+services:
+  postgres:
+    image: postgres:15-alpine
+    environment: { POSTGRES_DB: "${POSTGRES_DB:-aicourt}", POSTGRES_USER: "${POSTGRES_USER:-aicourt}", POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:-aicourt}" }
+    volumes: [pgdata:/var/lib/postgresql/data, ../services/db/init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro]
+    healthcheck: { test: ["CMD-SHELL","pg_isready -U ${POSTGRES_USER:-aicourt} -d ${POSTGRES_DB:-aicourt}"], interval: 10s, timeout: 5s, retries: 12 }
+    restart: unless-stopped
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server","--appendonly","yes"]
+    volumes: [redisdata:/data]
+    healthcheck: { test: ["CMD","redis-cli","ping"], interval: 10s, timeout: 5s, retries: 12 }
+    restart: unless-stopped
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment: { MINIO_ROOT_USER: "${MINIO_ROOT_USER:-minioadmin}", MINIO_ROOT_PASSWORD: "${MINIO_ROOT_PASSWORD:-minioadmin}" }
+    volumes: [miniodata:/data]
+    restart: unless-stopped
+  minio_init:
+    image: minio/mc:latest
+    depends_on: [minio]
+    entrypoint: ["/bin/sh","-lc"]
+    command: "until mc alias set local http://minio:9000 ${MINIO_ROOT_USER:-minioadmin} ${MINIO_ROOT_PASSWORD:-minioadmin}; do sleep 2; done; mc mb -p local/${MINIO_BUCKET_EVIDENCE:-evidence} || true; mc anonymous set none local/${MINIO_BUCKET_EVIDENCE:-evidence} || true"
+    restart: "no"
+  keycloak:
+    image: quay.io/keycloak/keycloak:25.0
+    command: start-dev --http-port=8080 --health-enabled=true
+    environment: { KEYCLOAK_ADMIN: "${KEYCLOAK_ADMIN:-admin}", KEYCLOAK_ADMIN_PASSWORD: "${KEYCLOAK_ADMIN_PASSWORD:-admin}", KC_HEALTH_ENABLED: "true" }
+    restart: unless-stopped
+  ollama:
+    image: ollama/ollama:latest
+    volumes: [ollama:/root/.ollama]
+    restart: unless-stopped
+  ai:
+    build: { context: ../services/ai }
+    environment: { OLLAMA_BASE_URL: "http://ollama:11434", OLLAMA_MODEL: "${OLLAMA_MODEL:-llama3.2:3b}" }
+    depends_on: [ollama]
+    restart: unless-stopped
+  api:
+    build: { context: ../services/api }
+    environment:
+      DATABASE_URL: "postgresql://${POSTGRES_USER:-aicourt}:${POSTGRES_PASSWORD:-aicourt}@postgres:5432/${POSTGRES_DB:-aicourt}"
+      AI_BASE_URL: "http://ai:8000"
+      MINIO_ENDPOINT: "minio"
+      MINIO_PORT: "9000"
+      MINIO_ACCESS_KEY: "${MINIO_ROOT_USER:-minioadmin}"
+      MINIO_SECRET_KEY: "${MINIO_ROOT_PASSWORD:-minioadmin}"
+      MINIO_BUCKET_EVIDENCE: "${MINIO_BUCKET_EVIDENCE:-evidence}"
+    depends_on: [postgres,minio_init,ai,keycloak]
+    restart: unless-stopped
+  web:
+    build: { context: ../services/web }
+    environment: { NEXT_PUBLIC_API_BASE_URL: "/api" }
+    depends_on: [api]
+    restart: unless-stopped
+  nginx:
+    image: nginx:1.27-alpine
+    ports: ["${HTTP_PORT:-80}:80"]
+    volumes: [../infra/nginx/nginx.conf:/etc/nginx/nginx.conf:ro]
+    depends_on: [web,api]
+    restart: unless-stopped
+volumes: { pgdata: {}, redisdata: {}, miniodata: {}, ollama: {} }
