@@ -72,6 +72,37 @@
         update: true
         force: false
 
+    - name: Select a free private gateway port without stopping other services
+      ansible.builtin.command:
+        argv: [python3, '-', '{{ app_port | string }}', '{{ compose_project }}']
+        stdin: |
+          import json, socket, subprocess, sys
+          preferred, project = int(sys.argv[1]), sys.argv[2]
+          ids = subprocess.check_output([
+              'docker', 'ps', '-q', '--filter', 'label=com.docker.compose.project=' + project,
+              '--filter', 'label=com.docker.compose.service=nginx'], text=True).split()
+          for container in ids:
+              data = json.loads(subprocess.check_output(['docker', 'inspect', container], text=True))[0]
+              for binding in (data['NetworkSettings']['Ports'].get('80/tcp') or []):
+                  if binding['HostIp'] == '127.0.0.1':
+                      print(int(binding['HostPort']))
+                      sys.exit(0)
+          for port in range(preferred, min(preferred + 100, 65536)):
+              with socket.socket() as listener:
+                  try:
+                      listener.bind(('127.0.0.1', port))
+                  except OSError:
+                      continue
+                  print(port)
+                  sys.exit(0)
+          sys.exit('No free private gateway port found in the requested range')
+      register: gateway_selection
+      changed_when: false
+
+    - name: Remember selected port for this deployment
+      ansible.builtin.set_fact:
+        gateway_port: '{{ gateway_selection.stdout | trim | int }}'
+
     - name: Create production credentials only for a new installation
       ansible.builtin.shell: |
         set -eu
@@ -103,7 +134,7 @@
       ansible.builtin.lineinfile:
         path: '{{ app_dir }}/.env'
         regexp: '^HTTP_PORT='
-        line: 'HTTP_PORT=127.0.0.1:{{ app_port }}'
+        line: 'HTTP_PORT=127.0.0.1:{{ gateway_port }}'
         mode: '0600'
       no_log: true
 
@@ -112,7 +143,7 @@
         cmd: '{{ compose_command }} -p {{ compose_project }} --env-file .env -f docker/docker-compose.yml config --quiet'
         chdir: '{{ app_dir }}'
       environment:
-        HTTP_PORT: '127.0.0.1:{{ app_port }}'
+        HTTP_PORT: '127.0.0.1:{{ gateway_port }}'
       changed_when: false
       no_log: true
 
@@ -121,18 +152,18 @@
         cmd: '{{ compose_command }} -p {{ compose_project }} --env-file .env -f docker/docker-compose.yml build'
         chdir: '{{ app_dir }}'
       environment:
-        HTTP_PORT: '127.0.0.1:{{ app_port }}'
+        HTTP_PORT: '127.0.0.1:{{ gateway_port }}'
 
     - name: Start application with existing volumes
       ansible.builtin.command:
         cmd: '{{ compose_command }} -p {{ compose_project }} --env-file .env -f docker/docker-compose.yml up -d'
         chdir: '{{ app_dir }}'
       environment:
-        HTTP_PORT: '127.0.0.1:{{ app_port }}'
+        HTTP_PORT: '127.0.0.1:{{ gateway_port }}'
 
     - name: Verify actual application response with GET
       ansible.builtin.uri:
-        url: 'http://127.0.0.1:{{ app_port }}/'
+        url: 'http://127.0.0.1:{{ gateway_port }}/'
         return_content: true
         status_code: 200
       register: readiness
@@ -142,7 +173,7 @@
 
     - name: Verify API and database readiness
       ansible.builtin.uri:
-        url: 'http://127.0.0.1:{{ app_port }}/api/dashboard'
+        url: 'http://127.0.0.1:{{ gateway_port }}/api/dashboard'
         status_code: 200
       register: api_ready
       until: api_ready.status == 200
@@ -165,7 +196,7 @@
             server_name {{ domain }};
             client_max_body_size 100m;
             location / {
-              proxy_pass http://127.0.0.1:{{ app_port }};
+              proxy_pass http://127.0.0.1:{{ gateway_port }};
               proxy_http_version 1.1;
               proxy_set_header Host $host;
               proxy_set_header X-Real-IP $remote_addr;
@@ -229,6 +260,6 @@
     - name: Report DNS requirement
       ansible.builtin.debug:
         msg: >-
-          Application gateway is on 127.0.0.1:{{ app_port }}.
+          Application gateway is on 127.0.0.1:{{ gateway_port }}.
           Set {{ domain }} A to {{ public_ip }}, remove stale AAAA records,
           then rerun this playbook to provision HTTPS. Existing credentials and volumes are retained.
