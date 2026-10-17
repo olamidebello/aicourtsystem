@@ -107,16 +107,28 @@
         mode: '0600'
       no_log: true
 
-    - name: Validate and build deployment using existing environment and volumes
-      ansible.builtin.shell: |
-        set -eu
-        export HTTP_PORT=127.0.0.1:{{ app_port }}
-        {{ compose_command }} -p {{ compose_project }} --env-file .env -f docker/docker-compose.yml config --quiet
-        {{ compose_command }} -p {{ compose_project }} --env-file .env -f docker/docker-compose.yml build
-        {{ compose_command }} -p {{ compose_project }} --env-file .env -f docker/docker-compose.yml up -d
-      args:
+    - name: Validate Compose without exposing interpolated credentials
+      ansible.builtin.command:
+        cmd: '{{ compose_command }} -p {{ compose_project }} --env-file .env -f docker/docker-compose.yml config --quiet'
         chdir: '{{ app_dir }}'
+      environment:
+        HTTP_PORT: '127.0.0.1:{{ app_port }}'
+      changed_when: false
       no_log: true
+
+    - name: Build application images
+      ansible.builtin.command:
+        cmd: '{{ compose_command }} -p {{ compose_project }} --env-file .env -f docker/docker-compose.yml build'
+        chdir: '{{ app_dir }}'
+      environment:
+        HTTP_PORT: '127.0.0.1:{{ app_port }}'
+
+    - name: Start application with existing volumes
+      ansible.builtin.command:
+        cmd: '{{ compose_command }} -p {{ compose_project }} --env-file .env -f docker/docker-compose.yml up -d'
+        chdir: '{{ app_dir }}'
+      environment:
+        HTTP_PORT: '127.0.0.1:{{ app_port }}'
 
     - name: Verify actual application response with GET
       ansible.builtin.uri:
