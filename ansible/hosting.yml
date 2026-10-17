@@ -1,0 +1,222 @@
+---
+# Run on the target host: ansible-playbook -i localhost, -c local ansible/hosting.yml
+- name: Provision AI Court System on an existing Nginx host
+  hosts: all
+  become: true
+  vars:
+    domain: aicourtsystem.com
+    public_ip: 181.214.149.146
+    app_dir: /opt/aicourtsystem
+    repo_url: https://github.com/olamidebello/aicourtsystem.git
+    repo_ref: main
+    app_port: 18080
+    # Keep the historical Compose project name so existing named volumes are reused.
+    compose_project: docker
+    enable_https: true
+  tasks:
+    - name: Validate deployment inputs
+      ansible.builtin.assert:
+        that:
+          - domain is match('^[a-z0-9][a-z0-9.-]+[a-z0-9]$')
+          - app_dir is match('^/[A-Za-z0-9/_-]+$')
+          - app_port | int > 1024
+          - app_port | int < 65536
+          - compose_project is match('^[a-z0-9][a-z0-9_-]*$')
+
+    - name: Install hosting prerequisites
+      ansible.builtin.apt:
+        name: [git, nginx, certbot, python3-certbot-nginx, openssl, python3]
+        state: present
+        update_cache: true
+
+    - name: Check Docker availability
+      ansible.builtin.command: docker --version
+      register: docker_check
+      changed_when: false
+      failed_when: false
+
+    - name: Install Docker only when absent
+      ansible.builtin.apt:
+        name: docker.io
+        state: present
+      when: docker_check.rc != 0
+
+    - name: Check Compose plugin
+      ansible.builtin.command: docker compose version
+      register: compose_check
+      changed_when: false
+      failed_when: false
+
+    - name: Install Debian Compose fallback
+      ansible.builtin.apt:
+        name: docker-compose
+        state: present
+      when: compose_check.rc != 0
+
+    - name: Select Compose command
+      ansible.builtin.set_fact:
+        compose_command: "{{ 'docker compose' if compose_check.rc == 0 else 'docker-compose' }}"
+
+    - name: Enable Docker and Nginx
+      ansible.builtin.service:
+        name: '{{ item }}'
+        enabled: true
+        state: started
+      loop: [docker, nginx]
+
+    - name: Pull application without overwriting local changes
+      ansible.builtin.git:
+        repo: '{{ repo_url }}'
+        dest: '{{ app_dir }}'
+        version: '{{ repo_ref }}'
+        update: true
+        force: false
+
+    - name: Create production credentials only for a new installation
+      ansible.builtin.shell: |
+        set -eu
+        umask 077
+        {
+          echo POSTGRES_DB=aicourt
+          echo POSTGRES_USER=aicourt
+          echo "POSTGRES_PASSWORD=$(openssl rand -hex 32)"
+          echo MINIO_ROOT_USER=aicourt
+          echo "MINIO_ROOT_PASSWORD=$(openssl rand -hex 32)"
+          echo MINIO_BUCKET_EVIDENCE=evidence
+          echo KEYCLOAK_ADMIN=admin
+          echo "KEYCLOAK_ADMIN_PASSWORD=$(openssl rand -hex 32)"
+          echo OLLAMA_MODEL=llama3.2:3b
+        } > .env
+      args:
+        chdir: '{{ app_dir }}'
+        creates: '{{ app_dir }}/.env'
+      no_log: true
+
+    - name: Protect existing environment file
+      ansible.builtin.file:
+        path: '{{ app_dir }}/.env'
+        owner: root
+        group: root
+        mode: '0600'
+
+    - name: Persist private gateway binding for future deployments
+      ansible.builtin.lineinfile:
+        path: '{{ app_dir }}/.env'
+        regexp: '^HTTP_PORT='
+        line: 'HTTP_PORT=127.0.0.1:{{ app_port }}'
+        mode: '0600'
+      no_log: true
+
+    - name: Validate and build deployment using existing environment and volumes
+      ansible.builtin.shell: |
+        set -eu
+        export HTTP_PORT=127.0.0.1:{{ app_port }}
+        {{ compose_command }} -p {{ compose_project }} --env-file .env -f docker/docker-compose.yml config --quiet
+        {{ compose_command }} -p {{ compose_project }} --env-file .env -f docker/docker-compose.yml build
+        {{ compose_command }} -p {{ compose_project }} --env-file .env -f docker/docker-compose.yml up -d
+      args:
+        chdir: '{{ app_dir }}'
+      no_log: true
+
+    - name: Verify actual application response with GET
+      ansible.builtin.uri:
+        url: 'http://127.0.0.1:{{ app_port }}/'
+        return_content: true
+        status_code: 200
+      register: readiness
+      until: readiness.status == 200 and 'AI Court System' in readiness.content
+      retries: 40
+      delay: 5
+
+    - name: Verify API and database readiness
+      ansible.builtin.uri:
+        url: 'http://127.0.0.1:{{ app_port }}/api/dashboard'
+        status_code: 200
+      register: api_ready
+      until: api_ready.status == 200
+      retries: 30
+      delay: 5
+
+    - name: Check whether managed host configuration already exists
+      ansible.builtin.stat:
+        path: '/etc/nginx/sites-available/{{ domain }}'
+      register: host_config
+
+    - name: Create initial domain configuration without replacing existing TLS
+      ansible.builtin.copy:
+        dest: '/etc/nginx/sites-available/{{ domain }}'
+        force: false
+        mode: '0644'
+        content: |
+          server {
+            listen 80;
+            server_name {{ domain }};
+            client_max_body_size 100m;
+            location / {
+              proxy_pass http://127.0.0.1:{{ app_port }};
+              proxy_http_version 1.1;
+              proxy_set_header Host $host;
+              proxy_set_header X-Real-IP $remote_addr;
+              proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+              proxy_set_header X-Forwarded-Proto $scheme;
+              proxy_read_timeout 300s;
+              proxy_send_timeout 300s;
+            }
+          }
+
+    - name: Enable domain
+      ansible.builtin.file:
+        src: '/etc/nginx/sites-available/{{ domain }}'
+        dest: '/etc/nginx/sites-enabled/{{ domain }}'
+        state: link
+
+    - name: Validate Nginx before reload
+      ansible.builtin.command: nginx -t
+      changed_when: false
+
+    - name: Reload Nginx
+      ansible.builtin.service:
+        name: nginx
+        state: reloaded
+
+    - name: Verify host routing reaches the correct application
+      ansible.builtin.uri:
+        url: http://127.0.0.1/
+        headers:
+          Host: '{{ domain }}'
+        follow_redirects: none
+        return_content: true
+        status_code: [200, 301, 302, 308]
+      register: host_ready
+      failed_when: host_ready.status == 200 and 'AI Court System' not in host_ready.content
+
+    - name: Resolve current domain address
+      ansible.builtin.command:
+        argv: [getent, ahostsv4, '{{ domain }}']
+      register: dns_check
+      changed_when: false
+      failed_when: false
+
+    - name: Provision HTTPS when DNS points exclusively to this server
+      ansible.builtin.command:
+        argv:
+          - certbot
+          - --nginx
+          - --non-interactive
+          - --agree-tos
+          - --register-unsafely-without-email
+          - --redirect
+          - --keep-until-expiring
+          - -d
+          - '{{ domain }}'
+      when:
+        - enable_https | bool
+        - dns_check.rc == 0
+        - dns_check.stdout.split() | select('match', '^([0-9]+\.){3}[0-9]+$') | unique | list == [public_ip]
+
+    - name: Report DNS requirement
+      ansible.builtin.debug:
+        msg: >-
+          Application gateway is on 127.0.0.1:{{ app_port }}.
+          Set {{ domain }} A to {{ public_ip }}, remove stale AAAA records,
+          then rerun this playbook to provision HTTPS. Existing credentials and volumes are retained.
