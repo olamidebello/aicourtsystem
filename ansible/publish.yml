@@ -1,0 +1,136 @@
+---
+# Run from the existing production checkout; preserves .env and Compose volumes.
+- name: Install and deploy JustiSolve platform
+  ansible.builtin.import_playbook: platform.yml
+
+- name: Publish both JustiSolve hostnames and register verified panel hosting
+  hosts: all
+  become: true
+  vars:
+    app_dir: /opt/aicourtsystem
+    public_ip: 181.214.149.146
+    public_names: [justisolve.com, www.justisolve.com]
+    tls_email: ''
+  tasks:
+    - name: Verify both public names resolve to this IPv4 host without stale IPv6
+      ansible.builtin.command:
+        argv: [python3, '-', '{{ public_ip }}']
+        stdin: |
+          import socket,sys
+          expected=sys.argv[1]
+          for host in ['justisolve.com','www.justisolve.com']:
+              ipv4={r[4][0] for r in socket.getaddrinfo(host,80,socket.AF_INET,socket.SOCK_STREAM)}
+              if ipv4!={expected}:sys.exit(host+' must resolve exclusively to '+expected)
+              try:ipv6=socket.getaddrinfo(host,80,socket.AF_INET6,socket.SOCK_STREAM)
+              except socket.gaierror:ipv6=[]
+              if ipv6:sys.exit(host+' has IPv6 DNS; configure IPv6 hosting or remove the stale AAAA record first.')
+          print('Both public hostnames resolve to the expected server.')
+      changed_when: false
+
+    - name: Reject conflicting hostnames managed by other Nginx files
+      ansible.builtin.command:
+        argv: [python3, '-']
+        stdin: |
+          import re,sys
+          from pathlib import Path
+          owned=Path('/etc/nginx/sites-available/justisolve.com').resolve()
+          for path in Path('/etc/nginx/sites-enabled').iterdir():
+              if path.resolve()==owned or not path.is_file():continue
+              text=re.sub(r'#.*','',path.read_text())
+              for names in re.findall(r'\bserver_name\s+([^;]+);',text):
+                  if set(names.split())&{'justisolve.com','www.justisolve.com'}:
+                      sys.exit('Conflicting hostname in '+str(path)+'; resolve it before publishing.')
+      changed_when: false
+
+    - name: Obtain a certificate covering apex and www before configuring HTTPS
+      ansible.builtin.command:
+        argv: "{{ ['certbot','certonly','--nginx','--non-interactive','--agree-tos','--cert-name','justisolve.com','--expand','--keep-until-expiring','-d','justisolve.com','-d','www.justisolve.com'] + (['--email',tls_email] if tls_email | length else ['--register-unsafely-without-email']) }}"
+
+    - name: Validate private gateway binding and read its port only
+      ansible.builtin.command:
+        argv: [python3, '-']
+        stdin: |
+          import re
+          from pathlib import Path
+          rows=Path('.env').read_text().splitlines()
+          value=next(line.partition('=')[2].strip().strip('"\'') for line in rows if line.startswith('HTTP_PORT='))
+          assert re.fullmatch(r'127\.0\.0\.1:\d+',value), 'Expected private gateway binding'
+          print(int(value.rsplit(':',1)[1]))
+        chdir: '{{ app_dir }}'
+      register: private_port
+      changed_when: false
+      no_log: true
+
+    - name: Back up current owned domain configuration
+      ansible.builtin.slurp:
+        src: /etc/nginx/sites-available/justisolve.com
+      register: previous_host
+
+    - name: Configure both hostnames with validated TLS and existing backend
+      block:
+        - name: Write owned JustiSolve virtual host
+          ansible.builtin.copy:
+            dest: /etc/nginx/sites-available/justisolve.com
+            mode: '0644'
+            backup: true
+            content: |
+              server {
+                  listen 80;
+                  server_name justisolve.com www.justisolve.com;
+                  return 301 https://$host$request_uri;
+              }
+              server {
+                  listen 443 ssl;
+                  server_name justisolve.com www.justisolve.com;
+                  ssl_certificate /etc/letsencrypt/live/justisolve.com/fullchain.pem;
+                  ssl_certificate_key /etc/letsencrypt/live/justisolve.com/privkey.pem;
+                  ssl_protocols TLSv1.2 TLSv1.3;
+                  client_max_body_size 100m;
+                  location / {
+                      proxy_pass http://127.0.0.1:{{ private_port.stdout | trim | int }};
+                      proxy_http_version 1.1;
+                      proxy_set_header Host $host;
+                      proxy_set_header X-Real-IP $remote_addr;
+                      proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                      proxy_set_header X-Forwarded-Proto $scheme;
+                      proxy_read_timeout 960s;
+                      proxy_send_timeout 300s;
+                  }
+              }
+        - name: Validate Nginx
+          ansible.builtin.command: nginx -t
+          changed_when: false
+      rescue:
+        - name: Restore previous configuration after validation failure
+          ansible.builtin.copy:
+            dest: /etc/nginx/sites-available/justisolve.com
+            content: '{{ previous_host.content | b64decode }}'
+            mode: '0644'
+        - name: Stop without reloading invalid configuration
+          ansible.builtin.fail:
+            msg: Nginx validation failed; previous domain configuration restored.
+
+    - name: Reload host Nginx
+      ansible.builtin.service:
+        name: nginx
+        state: reloaded
+
+    - name: Verify public HTTPS pages and certificates
+      ansible.builtin.uri:
+        url: 'https://{{ item }}/'
+        return_content: true
+        validate_certs: true
+        status_code: 200
+      loop: '{{ public_names }}'
+      register: public_pages
+      until: public_pages.status == 200 and 'JustiSolve' in public_pages.content
+      retries: 5
+      delay: 3
+
+    - name: Export verified hosting to Olamidepanel
+      ansible.builtin.command:
+        argv: [python3, '{{ app_dir }}/scripts/hosting-status.py']
+
+    - name: Show published URLs
+      ansible.builtin.debug:
+        msg: JustiSolve verified at https://justisolve.com/ and https://www.justisolve.com/. Olamidepanel Hosting Domains inventory updated. Existing database volumes retained.

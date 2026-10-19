@@ -100,3 +100,11 @@ Terms, Privacy, AI/Editorial, Acceptable Use and request reporting are available
 The OpenAI key created in the development workspace is not automatically transferred to the host. Configure production secrets through your secure deployment process. Never commit `.env`, paste API keys into logs or include them in support reports.
 
 User accounts may now be provisioned through Admin → Accounts with role **User**. They can analyze their own narratives/documents through the private Intake workspace; administrative APIs, general case records and other users' intake submissions remain inaccessible. The API migration creates the intake storage table automatically. Text-readable PDF/DOCX/TXT extraction is supported; scanned/image documents require OCR before submission.
+
+## Provision JustiSolve hosting in Olamidepanel (apex and www)
+
+From the existing `/opt/aicourtsystem` checkout, run `git pull --ff-only` and `bash scripts/publish.sh` as root. The publisher runs platform installation first, verifies both hostname DNS records and the internal API, obtains a certificate covering both names, validates/reloads the dedicated Nginx host, verifies both public HTTPS pages, then merges the verified application status into Olamidepanel's Hosting Domains snapshot. Other domain records and existing application database volumes are retained. A failed API, DNS, certificate or public check stops publication; no successful panel status is fabricated.
+
+Required DNS: `justisolve.com` A points to `181.214.149.146`; `www.justisolve.com` CNAME points to `justisolve.com` (or its A points to the same IP). Remove stale AAAA records unless IPv6 is configured separately. The publisher checks these records; it does not have DNS-provider credentials to change them. It refuses conflicting Nginx hostname definitions in other enabled files. Certificate renewal is managed by the installed Certbot setup. Optionally supply `-e tls_email=YOUR_OPERATOR_EMAIL`.
+
+Olamidepanel's GUI remains a read-only hosting inventory for this application. Publishing does not install a general-purpose terminal, create a hosting subscription, reset an admin password, configure email, or transfer AI API credentials to production. It verifies and registers the actual JustiSolve installation. If any step fails, share the named task error without including `.env` contents.
