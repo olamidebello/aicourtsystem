@@ -83,7 +83,7 @@ services:
       MINIO_ACCESS_KEY: "${MINIO_ROOT_USER:-minioadmin}"
       MINIO_SECRET_KEY: "${MINIO_ROOT_PASSWORD:-minioadmin}"
       MINIO_BUCKET_EVIDENCE: "${MINIO_BUCKET_EVIDENCE:-evidence}"
-    depends_on: [postgres,minio_init,ai,keycloak]
+    depends_on: [postgres,minio_init,ai]
     restart: unless-stopped
   web:
     build: { context: ../services/web }
