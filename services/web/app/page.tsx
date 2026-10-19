@@ -22,7 +22,7 @@ export default function Home(){
  async function draft(){setBusy(true);setError('');setAiResult('');try{const r=await post('/ai/draft',{filing_type:'legal memorandum',inputs:{source:aiText},tone:'formal'});setAiResult(r.draft_markdown)}catch(e:any){setError(e.message||'Draft generation failed.')}finally{setBusy(false)}}
  async function search(){if(!q.trim())return;setBusy(true);setError('');try{setData(await get('/search?q='+encodeURIComponent(q)));setTab('search')}catch(e:any){setError(e.message||'Search failed.')}finally{setBusy(false)}}
  return <div className="shell">
-  <aside><div className="brand"><div className="seal">AI</div><div><b>AI Court System</b><small>Legal Operations Platform</small></div></div>
+  <aside><div className="brand"><img className="brandLogo" src="/justisolve-logo.png" alt="JustiSolve — Intelligent Solutions. Fairer Justice." width={1536} height={1024}/><span className="brandSlogan">Intelligent Solutions. Fairer Justice.</span></div>
    <nav>{modules.map(([id,label])=><button key={id} className={tab===id?'active':''} onClick={()=>setTab(id)}>{label}</button>)}</nav>
    <div className="asideFoot"><span>Service status unverified</span><small>Development workspace</small></div>
   </aside>

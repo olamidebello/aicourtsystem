@@ -2,7 +2,7 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 import os, httpx
 
-app=FastAPI(title="AI Court System AI",version="2.0.0")
+app=FastAPI(title="JustiSolve AI",version="2.0.0")
 OLLAMA=os.getenv("OLLAMA_BASE_URL","http://ollama:11434")
 MODEL=os.getenv("OLLAMA_MODEL","llama3.2:3b")
 SYSTEM="""You are an AI assistant for legal record organization and drafting. Never invent citations, quotations, record facts, holdings, procedural events, or deadlines. Clearly label uncertainty and missing information. Generated output requires independent human review."""

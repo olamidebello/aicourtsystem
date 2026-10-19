@@ -1,13 +1,14 @@
 ---
 # Run on the target host: ansible-playbook -i localhost, -c local ansible/hosting.yml
-- name: Provision AI Court System on an existing Nginx host
+- name: Provision JustiSolve on an existing Nginx host
   hosts: all
   become: true
   vars:
-    domain: aicourtsystem.com
+    domain: justisolve.com
     public_ip: 181.214.149.146
+    # Retain the existing installation path and its .env credentials during rebranding.
     app_dir: /opt/aicourtsystem
-    repo_url: https://github.com/olamidebello/aicourtsystem.git
+    repo_url: https://github.com/olamidebello/justisolve.git
     repo_ref: main
     app_port: 18080
     # Keep the historical Compose project name so existing named volumes are reused.
@@ -167,7 +168,7 @@
         return_content: true
         status_code: 200
       register: readiness
-      until: readiness.status == 200 and 'AI Court System' in readiness.content
+      until: readiness.status == 200 and 'JustiSolve' in readiness.content
       retries: 40
       delay: 5
 
@@ -231,7 +232,7 @@
         return_content: true
         status_code: [200, 301, 302, 308]
       register: host_ready
-      failed_when: host_ready.status == 200 and 'AI Court System' not in host_ready.content
+      failed_when: host_ready.status == 200 and 'JustiSolve' not in host_ready.content
 
     - name: Resolve current domain address
       ansible.builtin.command:

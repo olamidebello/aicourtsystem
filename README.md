@@ -1,6 +1,10 @@
-# AI Court System
+# JustiSolve
 
-AI Court System is a production-oriented, AI-assisted court, litigation, evidence, legal research, and case-management platform. The architecture combines a professional web interface, NestJS API, Python AI service, PostgreSQL, Redis, MinIO, Keycloak, Ollama, and Nginx in a containerized deployment.
+![JustiSolve](services/web/public/justisolve-logo.png)
+
+**Intelligent Solutions. Fairer Justice.**
+
+JustiSolve is a production-oriented, AI-assisted court, litigation, evidence, legal research, and case-management platform. The architecture combines a professional web interface, NestJS API, Python AI service, PostgreSQL, Redis, MinIO, Keycloak, Ollama, and Nginx in a containerized deployment.
 
 > **Status:** Active development. Some modules described below are part of the platform roadmap/architecture and should be verified end-to-end before production use. This software does not replace independent legal judgment.
 
@@ -203,7 +207,7 @@ Every backend authorization decision should be enforced server-side. Hiding a GU
 ## User Guide
 
 ### Sign In
-1. Open the configured AI Court System URL.
+1. Open the configured JustiSolve URL.
 2. Select **Sign In**.
 3. Authenticate through Keycloak.
 4. After authentication, the dashboard displays resources allowed by your role and organization.
@@ -249,7 +253,7 @@ Super Admin privileges should be limited to trusted platform operators.
 ### Repository Layout
 
 ```text
-aicourtsystem/
+justisolve/
 ├── docker/
 │   └── docker-compose.yml
 ├── infra/
@@ -345,8 +349,8 @@ Ollama can run CPU-only but larger models require substantially more RAM and wil
 ### Clone
 
 ```bash
-git clone https://github.com/olamidebello/aicourtsystem.git
-cd aicourtsystem
+git clone https://github.com/olamidebello/justisolve.git
+cd justisolve
 ```
 
 ### Environment
