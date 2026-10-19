@@ -49,3 +49,12 @@ async def compare(req:CompareReq):
 
 from .ensemble import router as ensemble_router
 app.include_router(ensemble_router)
+
+from .news import router as news_router
+app.include_router(news_router)
+
+from .media import router as media_router
+app.include_router(media_router)
+
+from .intake import router as intake_router
+app.include_router(intake_router)

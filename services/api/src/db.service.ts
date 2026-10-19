@@ -1,9 +1,15 @@
-import { Injectable, OnModuleDestroy } from '@nestjs/common';
+import { Injectable, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
+import { ADMIN_SCHEMA } from './admin-schema';
 import { Pool } from 'pg';
 
 @Injectable()
-export class DbService implements OnModuleDestroy {
+export class DbService implements OnModuleInit, OnModuleDestroy {
   readonly pool = new Pool({ connectionString: process.env.DATABASE_URL || 'postgresql://aicourt:aicourt@postgres:5432/aicourt' });
+  async onModuleInit(){
+    const client=await this.pool.connect();
+    try{await client.query('BEGIN');await client.query('SELECT pg_advisory_xact_lock(736191)');await client.query(ADMIN_SCHEMA);await client.query('COMMIT');}
+    catch(e){await client.query('ROLLBACK');throw e;}finally{client.release();}
+  }
   query(text:string, params:any[]=[]){ return this.pool.query(text, params); }
   async onModuleDestroy(){ await this.pool.end(); }
 }

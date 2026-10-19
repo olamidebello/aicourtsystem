@@ -74,6 +74,10 @@ services:
     environment:
       DATABASE_URL: "postgresql://${POSTGRES_USER:-aicourt}:${POSTGRES_PASSWORD:-aicourt}@postgres:5432/${POSTGRES_DB:-aicourt}"
       AI_BASE_URL: "http://ai:8000"
+      ADMIN_SETUP_TOKEN: "${ADMIN_SETUP_TOKEN:-}"
+      NEWS_WORKER_TOKEN: "${NEWS_WORKER_TOKEN:-}"
+      COOKIE_SECURE: "${COOKIE_SECURE:-true}"
+      OLLAMA_MODEL: "${OLLAMA_MODEL:-llama3.2:3b}"
       MINIO_ENDPOINT: "minio"
       MINIO_PORT: "9000"
       MINIO_ACCESS_KEY: "${MINIO_ROOT_USER:-minioadmin}"

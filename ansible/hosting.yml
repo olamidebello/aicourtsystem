@@ -124,6 +124,24 @@
         creates: '{{ app_dir }}/.env'
       no_log: true
 
+    - name: Generate missing admin bootstrap and worker secrets without changing existing values
+      ansible.builtin.command:
+        argv: [python3, '-']
+        stdin: |
+          from pathlib import Path
+          import secrets
+          p=Path('.env')
+          lines=p.read_text().splitlines()
+          for key in ['ADMIN_SETUP_TOKEN','NEWS_WORKER_TOKEN']:
+              present=next((line.partition('=')[2].strip() for line in lines if line.startswith(key+'=')), '')
+              if not present:
+                  lines=[line for line in lines if not line.startswith(key+'=')]
+                  lines.append(key+'='+secrets.token_hex(32))
+          p.write_text('\n'.join(lines)+'\n')
+          p.chmod(0o600)
+        chdir: '{{ app_dir }}'
+      no_log: true
+
     - name: Protect existing environment file
       ansible.builtin.file:
         path: '{{ app_dir }}/.env'
@@ -174,7 +192,7 @@
 
     - name: Verify API and database readiness
       ansible.builtin.uri:
-        url: 'http://127.0.0.1:{{ gateway_port }}/api/dashboard'
+        url: 'http://127.0.0.1:{{ gateway_port }}/api/health'
         status_code: 200
       register: api_ready
       until: api_ready.status == 200

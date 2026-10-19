@@ -72,3 +72,31 @@ Syntax-only validation (does not deploy):
 bash -n scripts/deploy.sh
 ansible-playbook -i localhost, -c local ansible/platform.yml --syntax-check
 ```
+
+## Administration, News and court-issue worker
+
+The API now applies idempotent administrative/news migrations at startup. Ansible creates `ADMIN_SETUP_TOKEN` and `NEWS_WORKER_TOKEN` in the existing `.env` only when absent. Open the HTTPS workspace, use the setup token from that root-only file, and provision the first super administrator with a unique password of at least 14 characters. The operational workspace and case APIs require a super-admin session; public News and policy pages remain accessible. Delegated tenant-user access is not enabled. `COOKIE_SECURE=true` requires HTTPS; only set it false for isolated localhost development.
+
+Bootstrap also creates three enabled, local-model news campaigns (all CourtListener opinions, Supreme Court, Fifth Circuit). They poll hourly with one new item per campaign; cross-feed source URL deduplication prevents repeat publication. The public page refreshes every 30 seconds. A source item must have readable opinion text and pass AI generation checks to publish; these checks are not independent legal verification. No story is guaranteed when sources/models are unavailable. Each campaign can be paused, edited, limited, set to draft-only, or assigned to a configured hosted model with explicit recurring processing authorization. A global news pause is available.
+
+`platform.yml` installs and enables `justisolve-news.timer` by default. It runs after boot and fifteen minutes after the preceding run finishes. The worker monitors recorded deadlines and executes due court-issue drafting jobs before news campaigns. Court jobs require 2–4 configured models, court context and explicitly supplied authorized source material. Unchanged input is skipped. Results are stored in the drafts table and admin history; this automation does not calculate unknown deadlines, contact parties, file documents or appear in court. Administrator changes or a source provider can require later human review.
+
+Audio is produced with local espeak-ng; video is a synthetic title card with audio using FFmpeg. Docker installs those resources in the AI image. Media is stored in the private MinIO bucket and served only for published posts. The public page includes synthetic-media labels and an audio transcript. Failed media generation is visible in the admin view and may be regenerated there. No voice cloning or simulated judge appearance is used. Public media access is revoked with the story when it is unpublished.
+
+```bash
+sudo bash scripts/deploy.sh
+systemctl status justisolve-news.timer
+journalctl -u justisolve-news.service -n 100 --no-pager
+# Perform a worker pass immediately:
+sudo systemctl start justisolve-news.service
+# Disable polling through deployment configuration:
+sudo bash scripts/deploy.sh -e enable_news_worker=false
+```
+
+Campaign “Queue next run” moves its due time forward; the next timer tick processes it. News global pause does not pause independent court drafting jobs; pause those individually. Already-sent provider requests may finish or incur costs. The worker uses database locks to prevent overlapping runs and keeps failures/history for review. It is bounded (up to three news campaigns and two court jobs per tick), so a large backlog may require additional ticks. Source URL deduplication retains failed records for admin review rather than retrying charges indefinitely. Publish/edit controls and policy request resolution are audited. Container restart policies recover exited services but do not provide rollback or a complete backup strategy.
+
+Terms, Privacy, AI/Editorial, Acceptable Use and request reporting are available at `/policies`. Configure organization-specific legal details and obtain appropriate legal review before representing these as comprehensive jurisdiction-specific compliance terms. Privacy/copyright requests enter a protected admin queue; they do not automatically erase information or send email.
+
+The OpenAI key created in the development workspace is not automatically transferred to the host. Configure production secrets through your secure deployment process. Never commit `.env`, paste API keys into logs or include them in support reports.
+
+User accounts may now be provisioned through Admin → Accounts with role **User**. They can analyze their own narratives/documents through the private Intake workspace; administrative APIs, general case records and other users' intake submissions remain inaccessible. The API migration creates the intake storage table automatically. Text-readable PDF/DOCX/TXT extraction is supported; scanned/image documents require OCR before submission.

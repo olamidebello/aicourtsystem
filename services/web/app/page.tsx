@@ -1,10 +1,14 @@
 'use client';
+import Intake from './intake';
+import Admin from './admin';
+import AuthGate from './auth-gate';
+import NewsFeed from './news-feed';
 import Ensemble from './ensemble';
 import Pacer from './pacer';
 import {useEffect,useMemo,useState} from 'react';
 
 const modules=[
- ['dashboard','Dashboard'],['pacer','PACER Records'],['cases','Cases'],['dockets','Dockets'],['documents','Documents'],['evidence','Evidence'],
+ ['dashboard','Dashboard'],['intake','Case Intake'],['news','News'],['pacer','PACER Records'],['cases','Cases'],['dockets','Dockets'],['documents','Documents'],['evidence','Evidence'],
  ['transcripts','Transcripts'],['research','Legal Research'],['draft','AI Drafting'],['ensemble','Multi-model Motions'],['analyze','AI Analysis'],
  ['tasks','Tasks'],['deadlines','Deadlines'],['alerts','Alerts'],['audit','Audit & Compliance'],['admin','Administration']
 ];
@@ -23,7 +27,7 @@ export default function Home(){
  async function analyze(){setBusy(true);setError('');setAiResult('');try{const r=await post('/ai/analyze',{text:aiText,task:'legal record analysis'});setAiResult(r.analysis)}catch(e:any){setError(e.message||'AI analysis failed.')}finally{setBusy(false)}}
  async function draft(){setBusy(true);setError('');setAiResult('');try{const r=await post('/ai/draft',{filing_type:'legal memorandum',inputs:{source:aiText},tone:'formal'});setAiResult(r.draft_markdown)}catch(e:any){setError(e.message||'Draft generation failed.')}finally{setBusy(false)}}
  async function search(){if(!q.trim())return;setBusy(true);setError('');try{setData(await get('/search?q='+encodeURIComponent(q)));setTab('search')}catch(e:any){setError(e.message||'Search failed.')}finally{setBusy(false)}}
- return <div className="shell">
+ return <AuthGate><div className="shell">
   <aside><div className="brand"><img className="brandLogo" src="/justisolve-logo.png" alt="JustiSolve — Intelligent Solutions. Fairer Justice." width={1536} height={1024}/><span className="brandSlogan">Intelligent Solutions. Fairer Justice.</span></div>
    <nav>{modules.map(([id,label])=><button key={id} className={tab===id?'active':''} onClick={()=>setTab(id)}>{label}</button>)}</nav>
    <div className="asideFoot"><span>Service status unverified</span><small>Development workspace</small></div>
@@ -34,6 +38,8 @@ export default function Home(){
    </header>
    {error&&<div className="panel error" role="alert">{error}</div>}
    {busy&&<div className="notice">Working…</div>}
+   {tab==='intake'&&<Intake/>}
+   {tab==='news'&&<NewsFeed/>}
    {tab==='pacer'&&<Pacer api={API}/>}
    {tab==='ensemble'&&<Ensemble api={API}/>}
    {tab==='dashboard'&&<section className="cards">{['cases','documents','evidence','tasks','deadlines','alerts'].map(k=><article key={k}><small>{k.toUpperCase()}</small><strong>{data?.[k]??'—'}</strong><span>Current workspace</span></article>)}</section>}
@@ -41,8 +47,9 @@ export default function Home(){
    {tab==='cases'&&<><section className="panel"><h2>Create Case</h2><div className="formGrid">{Object.keys(form).map(k=><input key={k} placeholder={k.replaceAll('_',' ')} value={form[k]} onChange={e=>setForm({...form,[k]:e.target.value})}/>)}</div><button className="primary" disabled={busy} onClick={addCase}>Create Case</button></section><Table data={data}/></>}
    {['dockets','documents','evidence','transcripts','research','tasks','deadlines','alerts','audit','search'].includes(tab)&&<Table data={data}/>}
    {(tab==='analyze'||tab==='draft')&&<section className="aiGrid"><div className="panel"><h2>{tab==='draft'?'Draft Workspace':'AI Record Analysis'}</h2><p className="muted">Paste authorized source material. AI output must be verified against the record and controlling law.</p><textarea value={aiText} onChange={e=>setAiText(e.target.value)} placeholder="Paste source text, facts, transcript excerpt, order, or drafting instructions…"/><button className="primary" disabled={!aiText||busy} onClick={tab==='draft'?draft:analyze}>{tab==='draft'?'Generate Draft':'Analyze'}</button></div><div className="panel"><h2>Output</h2><pre>{aiResult||'No output yet.'}</pre></div></section>}
-   {tab==='admin'&&<section className="cards"><article><small>IDENTITY</small><strong>Keycloak</strong><span>Users, roles, sessions</span></article><article><small>STORAGE</small><strong>MinIO</strong><span>Evidence and documents</span></article><article><small>DATABASE</small><strong>PostgreSQL</strong><span>Relational system of record</span></article><article><small>AI</small><strong>Ollama</strong><span>Local model inference</span></article></section>}
+   {tab==='admin'&&<Admin api={API}/>}
+   <footer><a href="/news">News</a> · <a href="/policies">Terms, Privacy & AI Policies</a></footer>
   </main>
- </div>
+ </div></AuthGate>
 }
 function Table({data}:{data:any}){if(data?.error)return <section className="panel error">{data.error}</section>;if(!Array.isArray(data))return null;if(!data.length)return <section className="panel muted">No records yet.</section>;const keys=Object.keys(data[0]).slice(0,7);return <section className="panel tableWrap"><table><thead><tr>{keys.map(k=><th key={k}>{k.replaceAll('_',' ')}</th>)}</tr></thead><tbody>{data.map((r:any,i:number)=><tr key={i}>{keys.map(k=><td key={k}>{typeof r[k]==='object'?JSON.stringify(r[k]):String(r[k]??'')}</td>)}</tr>)}</tbody></table></section>}

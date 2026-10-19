@@ -23,22 +23,22 @@ class Request(BaseModel):
     court_rules:str=Field(default='',max_length=4000)
     target_score:int=Field(default=90,ge=80,le=100)
 
-async def generate(provider,prompt):
+async def generate(provider,prompt,system=SYSTEM):
     cfg=providers().get(provider)
     if not cfg or not cfg['enabled']: raise ValueError('Provider not configured')
     async with httpx.AsyncClient(timeout=180,follow_redirects=False) as c:
         if provider=='openai':
-            r=await c.post('https://api.openai.com/v1/responses',headers={'Authorization':'Bearer '+os.environ['OPENAI_API_KEY']},json={'model':cfg['model'],'instructions':SYSTEM,'input':prompt,'max_output_tokens':6000,'store':False})
+            r=await c.post('https://api.openai.com/v1/responses',headers={'Authorization':'Bearer '+os.environ['OPENAI_API_KEY']},json={'model':cfg['model'],'instructions':system,'input':prompt,'max_output_tokens':6000,'store':False})
             r.raise_for_status();d=r.json()
             if d.get('status')!='completed':raise ValueError('Incomplete output')
             text='\n'.join(x.get('text','') for item in d.get('output',[]) if item.get('type')=='message' for x in item.get('content',[]) if x.get('type')=='output_text')
         elif provider=='claude':
-            r=await c.post('https://api.anthropic.com/v1/messages',headers={'x-api-key':os.environ['ANTHROPIC_API_KEY'],'anthropic-version':'2023-06-01'},json={'model':cfg['model'],'system':SYSTEM,'messages':[{'role':'user','content':prompt}],'max_tokens':6000})
+            r=await c.post('https://api.anthropic.com/v1/messages',headers={'x-api-key':os.environ['ANTHROPIC_API_KEY'],'anthropic-version':'2023-06-01'},json={'model':cfg['model'],'system':system,'messages':[{'role':'user','content':prompt}],'max_tokens':6000})
             r.raise_for_status();d=r.json()
             if d.get('stop_reason')!='end_turn':raise ValueError('Incomplete output')
             text='\n'.join(x.get('text','') for x in d.get('content',[]) if x.get('type')=='text')
         else:
-            r=await c.post(os.getenv('OLLAMA_BASE_URL','http://ollama:11434')+'/api/chat',json={'model':cfg['model'],'messages':[{'role':'system','content':SYSTEM},{'role':'user','content':prompt}],'stream':False,'options':{'num_predict':6000}})
+            r=await c.post(os.getenv('OLLAMA_BASE_URL','http://ollama:11434')+'/api/chat',json={'model':cfg['model'],'messages':[{'role':'system','content':system},{'role':'user','content':prompt}],'stream':False,'options':{'num_predict':6000}})
             r.raise_for_status();d=r.json()
             if d.get('done_reason')=='length':raise ValueError('Incomplete output')
             text=d.get('message',{}).get('content','')

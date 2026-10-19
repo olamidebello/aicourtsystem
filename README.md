@@ -207,10 +207,10 @@ Every backend authorization decision should be enforced server-side. Hiding a GU
 ## User Guide
 
 ### Sign In
-1. Open the configured JustiSolve URL.
-2. Select **Sign In**.
-3. Authenticate through Keycloak.
-4. After authentication, the dashboard displays resources allowed by your role and organization.
+1. Open the configured JustiSolve HTTPS URL.
+2. Sign in with an account provisioned by a super administrator.
+3. User accounts open their private Case Intake workspace; super admins open the operational dashboard.
+4. Keycloak remains an architectural component and is not used by the current account sign-in flow.
 
 ### Dashboard
 Use the dashboard for active matters, recent activity, deadlines, tasks, documents, AI activity, alerts, and quick actions. Use the sidebar for full module navigation and breadcrumbs to return to a parent case or workspace.
@@ -593,7 +593,7 @@ Open **PACER Records**, connect with your own PACER username/password and option
 
 Import selected case details into **Cases** with PACER court/case identifiers, source link, environment and import timestamp in metadata. Existing matching records are detected in the UI. Court links open in a new tab for docket reports and PDFs. **This integration does not automatically download full docket reports or filing PDFs**; the official Case Locator API is an index, not a uniform document-retrieval API. Court-specific retrieval adapters are still required for automated document downloads.
 
-PACER passwords/MFA codes are never persisted. The backend keeps PACER tokens in memory for up to 20 minutes and gives the browser a separate random connection handle held only in component memory. Disconnect attempts PACER logout and always removes the local session. No automated retries are made for billable calls. Use HTTPS and exclude request bodies/authorization headers from proxy or infrastructure logs. PACER integration does not implement the platform's missing authentication/tenant-isolation layer: deploy only behind authenticated access until application-wide authorization is completed. Do not expose the existing case APIs publicly for sensitive legal records.
+PACER passwords/MFA codes are never persisted. The backend keeps PACER tokens in memory for up to 20 minutes and gives the browser a separate random connection handle held only in component memory. Disconnect attempts PACER logout and always removes the local session. No automated retries are made for billable calls. Use HTTPS and exclude request bodies/authorization headers from proxy or infrastructure logs. PACER routes require an authenticated super-admin session in the current release. General case access remains admin-only until delegated tenant authorization is implemented.
 
 API routes: `POST /api/pacer/connect`, `POST /api/pacer/search`, `POST /api/pacer/disconnect`, `GET /api/pacer/info`. Search/disconnect use `Authorization: Bearer <connection handle>`. Only fixed official PACER endpoints are contacted; redirects are rejected. Source links are restricted to HTTPS court hosts. Sessions are process-local: use sticky routing for multiple API replicas. No live PACER account was used in automated tests.
 
@@ -605,8 +605,26 @@ References: [PACER developer resources](https://pacer.uscourts.gov/file-case/dev
 
 Set `OPENAI_API_KEY`/`OPENAI_MODEL` and `ANTHROPIC_API_KEY`/`ANTHROPIC_MODEL` in the server `.env` to enable hosted models. No credentials are bundled. Configure additional locally hosted open models with comma-separated `OLLAMA_DRAFT_MODELS` and install each model in Ollama; the provider list reflects configuration, not live model availability. Model IDs must be supported by the relevant account. Hosted calls use OpenAI Responses and Anthropic Messages APIs. External transmission requires explicit per-request consent; selected source material and model drafts are shared with the selected providers, with extra calls to the synthesis provider. Keys stay server-side. OpenAI requests use `store:false`; this does not override providers' service-wide data policies. API charges apply. No live hosted-provider calls were made during development.
 
-Upstream timeouts allow up to 15 minutes for the bounded pipeline. Run behind authenticated access; application-wide authentication, tenant authorization and per-user spending controls remain deployment prerequisites. Do not expose server-funded AI routes publicly. The workflow does not automatically fetch or verify legal authorities or file anything with a court. Inputs are limited to 4,000 request characters and 24,000 source characters. Drafts remain in the current page until downloaded; switching modules or reloading clears the workspace.
+Upstream timeouts allow up to 15 minutes for the bounded pipeline. The current release restricts these routes to authenticated super admins; delegated tenant authorization and per-user spending controls are not implemented. The workflow does not automatically fetch or verify legal authorities or file anything with a court. Inputs are limited to 4,000 request characters and 24,000 source characters. Drafts remain in the current page until downloaded; switching modules or reloading clears the workspace.
 
 Validation: `cd services/api && npm run build && node --test test/pacer.cjs`; `cd services/web && npm run build`; `cd services/ai && python -m unittest discover -s tests`.
 
 All motion drafting defaults to formal court filing structure. Multi-model requests require the court/jurisdiction and accept case number, caption parties and local-rule instructions. Missing information remains explicit. Markdown output is a drafting format, not a typeset filing; verify pagination, typography, signatures, service and the particular court's current rules before filing.
+
+## Administrative control, public News and scheduled court tasks (current implementation)
+
+The current API secures operational routes with super-admin sessions. Use the one-time `ADMIN_SETUP_TOKEN` to provision the first administrator, then sign in. Accounts can be provisioned and disabled; organization records managed; campaigns configured, paused and queued; stories edited/published/unpublished; media generated; service checks viewed; and policy requests resolved. Passwords use salted scrypt hashes, session secrets are hashed in PostgreSQL, and sessions use HttpOnly/SameSite=Strict cookies. General case management is admin-only; ordinary accounts access only their own private case-intake submissions. Organization inventory does not enable delegated case access or certify tenant isolation. Existing Keycloak container deployment is not represented as a working user-login integration.
+
+`/news` refreshes every thirty seconds. Supported public feeds are CourtListener's all-opinion, Supreme Court and Fifth Circuit feeds. The scheduled worker follows campaign settings, retrieves allowlisted opinion text, deduplicates source URLs, and generates labeled “AI Opinion Order — Commentary” stories. It does not silently publish private case files. AI checks and source links do not establish accuracy or complete court coverage. If readable source text cannot be isolated, generation fails rather than pretending to have analyzed it. The text is source-limited and may omit important context.
+
+News campaigns can generate audio and MP4 title-card bulletins unattended. Synthetic voice comes from espeak-ng and video from FFmpeg, with visible and spoken AI/nonbinding disclosures. Media is stored in MinIO and public streaming is conditional on the story being published. `/policies` provides the site's Terms, Privacy, AI/Editorial and Acceptable Use notices plus a real correction/privacy/copyright reporting form stored in the admin queue.
+
+Court-issue automation accepts explicit source material, court details, provider selection and recurring external-processing authorization. It prepares drafts through independent generation, merging, scoring and revision, retains the higher-scoring version, and stores run results for review. It also alerts on approaching deadlines already recorded in the database. It does not infer legal deadlines, monitor every external docket, file documents, communicate with a court or act as a lawyer. Use the admin Court Automations section to manage these jobs. See `ansible/README.md` for setup and scheduled-worker instructions.
+
+Verification for this update: production frontend/API builds; authentication, PACER and Python drafting/news tests; repeatable PostgreSQL-compatible schema checks with PGlite; Ansible syntax, shell syntax and generated-secret-script validation. Live provider calls, live database deployment, and production media execution require host verification. Generated narration/video output depends on the container tools and available CPU/memory. No production deployment is implied by repository updates.
+
+### Narrative and document intake
+
+Super admins can provision a **User** account for private case intake or another **Super administrator** account. Users can submit a narrative and up to five text-readable PDF, DOCX or UTF-8 TXT files (10 MB each, 20 MB total), choose a configured model and authorize external processing when applicable. One submission triggers extraction and analysis; results distinguish the user narrative from document labels and provide issues, procedural options, prerequisites, benefits/risks, recommendations and missing information. Input and results are stored for that account only; source-file downloads enforce ownership on the backend. They are never used by public News campaigns.
+
+Extraction is bounded in a separate process with memory/CPU limits. PDFs are limited to the first 50 pages; DOCX extraction reads body text only. Combined document excerpts are capped at 36,000 characters, with truncation/unreadable-page warnings. Scanned PDFs/images need OCR before upload and are not represented as successfully read. Neither legal citations nor recommendations are independently verified. Original files are stored privately in MinIO and are downloadable from the owner's submission history. Data retention follows `/policies`; no automatic deletion schedule is implemented.
