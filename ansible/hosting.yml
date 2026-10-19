@@ -180,6 +180,29 @@
       environment:
         HTTP_PORT: '127.0.0.1:{{ gateway_port }}'
 
+    - name: Verify API directly before checking the gateway
+      ansible.builtin.command:
+        cmd: >-
+          {{ compose_command }} -p {{ compose_project }} --env-file .env -f docker/docker-compose.yml
+          exec -T api node -e "fetch('http://127.0.0.1:4000/api/health',{signal:AbortSignal.timeout(5000)}).then(async r=>{if(!r.ok)process.exit(1);const d=await r.json();if(d.ok!==true)process.exit(1)}).catch(()=>process.exit(1))"
+        chdir: '{{ app_dir }}'
+      register: internal_api_ready
+      until: internal_api_ready.rc == 0
+      retries: 30
+      delay: 5
+      changed_when: false
+
+    - name: Validate container gateway configuration after application recreation
+      ansible.builtin.command:
+        cmd: '{{ compose_command }} -p {{ compose_project }} --env-file .env -f docker/docker-compose.yml exec -T nginx nginx -t'
+        chdir: '{{ app_dir }}'
+      changed_when: false
+
+    - name: Reload container gateway to resolve current backend addresses
+      ansible.builtin.command:
+        cmd: '{{ compose_command }} -p {{ compose_project }} --env-file .env -f docker/docker-compose.yml exec -T nginx nginx -s reload'
+        chdir: '{{ app_dir }}'
+
     - name: Verify actual application response with GET
       ansible.builtin.uri:
         url: 'http://127.0.0.1:{{ gateway_port }}/'
