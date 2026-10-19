@@ -9,6 +9,13 @@ CREATE TABLE IF NOT EXISTS platform_sessions (
  token_hash TEXT PRIMARY KEY,account_id BIGINT NOT NULL REFERENCES platform_accounts(id) ON DELETE CASCADE,
  expires_at TIMESTAMPTZ NOT NULL,created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+ALTER TABLE platform_accounts ADD COLUMN IF NOT EXISTS email_verified BOOLEAN NOT NULL DEFAULT true;
+CREATE TABLE IF NOT EXISTS platform_account_tokens (
+ token_hash TEXT PRIMARY KEY,account_id BIGINT NOT NULL REFERENCES platform_accounts(id) ON DELETE CASCADE,
+ purpose TEXT NOT NULL CHECK(purpose IN ('verify','reset')),expires_at TIMESTAMPTZ NOT NULL,
+ created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS account_tokens_account_idx ON platform_account_tokens(account_id,created_at);
 CREATE TABLE IF NOT EXISTS news_campaigns (
  id BIGSERIAL PRIMARY KEY,name TEXT NOT NULL,source TEXT NOT NULL DEFAULT 'courtlistener',keywords TEXT NOT NULL DEFAULT '',
  enabled BOOLEAN NOT NULL DEFAULT true,auto_publish BOOLEAN NOT NULL DEFAULT true,

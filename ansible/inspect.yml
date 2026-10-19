@@ -1,0 +1,77 @@
+---
+- name: Inspect, build and repair JustiSolve sequentially
+  hosts: all
+  become: true
+  serial: 1
+  vars:
+    app_dir: /opt/aicourtsystem
+    compose_project: docker
+    repair_enabled: true
+    inspection_features: [authorization, account-email, dashboard, cases, dockets, documents, evidence, transcripts, research, tasks, deadlines, alerts, audit, search, intake, administration, accounts, organizations, campaigns, news, pacer, providers, ai-drafting, ai-analysis, multi-model-motions, court-automation, resources, policy-queue]
+  tasks:
+    - name: Validate inspection inputs
+      ansible.builtin.assert:
+        that:
+          - app_dir is match('^/[A-Za-z0-9/_-]+$')
+          - compose_project is match('^[a-z0-9][a-z0-9_-]*$')
+    - name: Detect Compose plugin
+      ansible.builtin.command: docker compose version
+      register: plugin
+      changed_when: false
+      failed_when: false
+    - name: Initialize command and report
+      ansible.builtin.set_fact:
+        inspection_compose: "{{ ['docker', 'compose'] if plugin.rc == 0 else ['docker-compose'] }}"
+        inspection_results: []
+    - name: Set Compose invocation
+      ansible.builtin.set_fact:
+        inspection_command: "{{ inspection_compose + ['-p', compose_project, '--env-file', '.env', '-f', 'docker/docker-compose.yml'] }}"
+    - name: Validate Compose without displaying secrets
+      ansible.builtin.command:
+        argv: "{{ inspection_command + ['config', '--quiet'] }}"
+        chdir: '{{ app_dir }}'
+      changed_when: false
+    - name: Build, test and start each application service
+      ansible.builtin.include_tasks: tasks/inspect-build.yml
+      loop: [api, web, ai]
+      loop_control:
+        loop_var: inspection_service
+    - name: Check each infrastructure service
+      ansible.builtin.include_tasks: tasks/inspect-infrastructure.yml
+      loop: [postgres, redis, minio, keycloak, ollama, ai, api, web, nginx]
+      loop_control:
+        loop_var: inspection_infra
+    - name: Inspect each feature and retry after a bounded repair
+      ansible.builtin.include_tasks: tasks/inspect-feature.yml
+      loop: '{{ inspection_features }}'
+      loop_control:
+        loop_var: inspection_feature
+    - name: Verify Nginx configuration
+      ansible.builtin.command:
+        argv: "{{ inspection_command + ['exec', '-T', 'nginx', 'nginx', '-t'] }}"
+        chdir: '{{ app_dir }}'
+      register: nginx_inspection
+      changed_when: false
+      failed_when: false
+    - name: Record proxy and manual verification requirements
+      ansible.builtin.set_fact:
+        inspection_results: "{{ inspection_results + [{'feature': 'nginx', 'status': ('passed' if nginx_inspection.rc == 0 else 'failed')}, {'feature': 'external-and-write-workflows', 'status': 'manual', 'scope': 'Verify SMTP delivery, file upload/download, case edits, AI generation, paid PACER, scheduled jobs, media, DNS and public HTTPS with authorized test data. Read probes do not certify these workflows.'}] }}"
+    - name: Create restricted report directory
+      ansible.builtin.file:
+        path: '{{ app_dir }}/inspection-reports'
+        state: directory
+        mode: '0700'
+    - name: Save sanitized inspection report
+      ansible.builtin.copy:
+        content: "{{ {'checked_at': now(utc=true, fmt='%Y-%m-%dT%H:%M:%SZ'), 'repair_enabled': repair_enabled | bool, 'results': inspection_results} | to_nice_json }}"
+        dest: '{{ app_dir }}/inspection-reports/latest.json'
+        mode: '0600'
+    - name: Display feature results
+      ansible.builtin.debug:
+        var: inspection_results
+    - name: Fail when a feature remains broken or needs configuration
+      ansible.builtin.assert:
+        that:
+          - inspection_results | selectattr('status', 'equalto', 'failed') | list | length == 0
+          - inspection_results | selectattr('status', 'equalto', 'attention') | list | length == 0
+        fail_msg: 'Inspection completed with unresolved items. Read inspection-reports/latest.json. Manual workflows still require verification.'

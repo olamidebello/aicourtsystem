@@ -628,3 +628,48 @@ Verification for this update: production frontend/API builds; authentication, PA
 Super admins can provision a **User** account for private case intake or another **Super administrator** account. Users can submit a narrative and up to five text-readable PDF, DOCX or UTF-8 TXT files (10 MB each, 20 MB total), choose a configured model and authorize external processing when applicable. One submission triggers extraction and analysis; results distinguish the user narrative from document labels and provide issues, procedural options, prerequisites, benefits/risks, recommendations and missing information. Input and results are stored for that account only; source-file downloads enforce ownership on the backend. They are never used by public News campaigns.
 
 Extraction is bounded in a separate process with memory/CPU limits. PDFs are limited to the first 50 pages; DOCX extraction reads body text only. Combined document excerpts are capped at 36,000 characters, with truncation/unreadable-page warnings. Scanned PDFs/images need OCR before upload and are not represented as successfully read. Neither legal citations nor recommendations are independently verified. Original files are stored privately in MinIO and are downloadable from the owner's submission history. Data retention follows `/policies`; no automatic deletion schedule is implemented.
+
+## Self-registration and password recovery
+
+The sign-in screen includes **Create account** and **Forgot password?** Public registration always creates an ordinary `user`, regardless of submitted role fields. A new account must confirm its email before signing in. Existing administrator-provisioned accounts remain usable. Self-registration is available only after the first administrator has completed setup.
+
+Set these values in the existing root-readable server `.env`, then rebuild/recreate the API and web services:
+
+```dotenv
+PUBLIC_APP_URL=https://justisolve.com
+ALLOW_REGISTRATION=true
+SMTP_HOST=your-mail-provider-host
+SMTP_PORT=587
+SMTP_SECURE=false
+SMTP_USER=your-mail-provider-username
+SMTP_PASSWORD=your-mail-provider-password
+SMTP_FROM=JustiSolve <accounts@your-domain>
+```
+
+Port 587 requires STARTTLS; for implicit TLS use port 465 with `SMTP_SECURE=true`. Certificate verification remains enabled. `PUBLIC_APP_URL` must be HTTPS; email links use its origin, never the request Host header. Configure the sender/domain with your mail provider. SMTP credentials are deployment secrets; they are not bundled or auto-created. Until email is configured, the GUI disables registration/recovery and the backend rejects those requests with an unavailable response. `ALLOW_REGISTRATION=false` closes registration while retaining recovery.
+
+Verification and reset links expire in 30 minutes, are purpose-bound and single-use, and are stored only as SHA-256 hashes. Link secrets use a URL fragment and are removed from the address before submission. Passwords require 14–200 characters and use salted scrypt. Password resets revoke all existing sessions. Requests return generic account-eligibility messages; per-IP limits and a database-backed two-minute per-account cooldown limit email flooding. If verification mail is lost or delivery fails, use **Forgot password?** to resend verification. After verification, recovery can issue a password reset. Disabled accounts cannot recover or sign in. Account email delivery failures are logged without email addresses, tokens or SMTP provider responses. These responses do not guarantee delivery; verify provider configuration and actual inbox receipt after deployment.
+
+## Sequential inspection and bounded automatic repair
+
+On the existing server checkout:
+
+```bash
+git pull --ff-only
+sudo bash scripts/deploy.sh
+sudo bash scripts/inspect-and-repair.sh
+```
+
+`ansible/inspect.yml` processes API, web and AI builds one by one, including regression tests in each Docker build. A failed build is retried once without Docker cache. Successfully built services are recreated without deleting persistent volumes. It checks nine infrastructure containers individually, attempts one recreation for a failed process/healthcheck, then performs 28 named feature inspections in order. Failed API probes trigger a single API restart and bounded retries. Application compilation errors, missing credentials and broken business logic are reported; this workflow does not generate speculative source changes or claim to repair every defect.
+
+Authenticated probes create an ephemeral two-minute super-admin session for an existing active verified administrator directly in the API container; the plaintext secret stays in process memory and is removed in `finally`. Abruptly killed checks leave only an expiring hashed session. Probes never print records, tokens, credentials or legal materials. Module probes check authenticated reads and basic response shapes. Authorization checks ensure unauthenticated access is rejected. Account-email checks cover configuration only. Inspection shares the deployment lock and does not change users, case files, account balances, campaigns or scheduled jobs, send email, buy PACER pages or invoke paid AI.
+
+The sanitized report is saved at `inspection-reports/latest.json` on the server with mode `0600`. Any failed or configuration-attention item causes a nonzero final result after all checks finish. Items requiring manual validation are listed explicitly: live SMTP delivery, uploads/downloads, edits, AI output, paid PACER, scheduled execution, generated media, DNS and public HTTPS. A passed read probe is not proof of an entire feature's end-to-end correctness. Container running state is not full integration health when no Docker healthcheck is defined.
+
+To inspect the existing installation without builds, restarts or recreation:
+
+```bash
+sudo bash scripts/inspect-and-repair.sh -e repair_enabled=false
+```
+
+An existing deployed stack and its `.env` are required; run the normal deployer first for a new host. No automatic recurring inspection is enabled by this script. Restrict Ansible report access and keep independent tested backups.

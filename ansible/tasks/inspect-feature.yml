@@ -1,0 +1,38 @@
+---
+- name: Inspect {{ inspection_feature }}
+  ansible.builtin.command:
+    argv: "{{ inspection_command + ['exec', '-T', 'api', 'node', '-', inspection_feature] }}"
+    stdin: "{{ lookup('ansible.builtin.file', playbook_dir + '/../scripts/feature-check.cjs') }}"
+    chdir: '{{ app_dir }}'
+  register: feature_probe
+  failed_when: false
+  changed_when: false
+
+- name: Restart API once for failed {{ inspection_feature }} probe
+  ansible.builtin.command:
+    argv: "{{ inspection_command + ['restart', 'api'] }}"
+    chdir: '{{ app_dir }}'
+  when: feature_probe.rc != 0 and repair_enabled | bool
+  register: feature_repair
+  failed_when: false
+
+- name: Recheck {{ inspection_feature }} after repair
+  ansible.builtin.command:
+    argv: "{{ inspection_command + ['exec', '-T', 'api', 'node', '-', inspection_feature] }}"
+    stdin: "{{ lookup('ansible.builtin.file', playbook_dir + '/../scripts/feature-check.cjs') }}"
+    chdir: '{{ app_dir }}'
+  register: feature_retry
+  changed_when: false
+  failed_when: false
+  until: feature_retry.rc == 0
+  retries: 3
+  delay: 5
+  when: feature_probe.rc != 0 and repair_enabled | bool
+
+- name: Select final feature output
+  ansible.builtin.set_fact:
+    feature_final: '{{ feature_retry if feature_retry is not skipped else feature_probe }}'
+
+- name: Record sanitized feature result
+  ansible.builtin.set_fact:
+    inspection_results: "{{ inspection_results + [((feature_final.stdout | from_json) if feature_final.stdout | default('') is match('^\\{') else {'feature': inspection_feature, 'status': 'failed', 'reason': 'Container probe unavailable; inspect service logs'})] }}"

@@ -1,0 +1,52 @@
+---
+- name: Resolve {{ inspection_infra }} container
+  ansible.builtin.command:
+    argv: "{{ inspection_command + ['ps', '-q', inspection_infra] }}"
+    chdir: '{{ app_dir }}'
+  register: infrastructure_id
+  changed_when: false
+  failed_when: false
+
+- name: Read {{ inspection_infra }} process health
+  ansible.builtin.command:
+    argv: ['docker', 'inspect', '--format', '{{ "{{.State.Status}} {{if .State.Health}}{{.State.Health.Status}}{{end}}" }}', '{{ infrastructure_id.stdout | trim }}']
+  register: infrastructure_state
+  changed_when: false
+  failed_when: false
+  when: infrastructure_id.rc == 0 and infrastructure_id.stdout | trim | length > 0
+
+- name: Determine {{ inspection_infra }} initial health
+  ansible.builtin.set_fact:
+    infrastructure_ok: "{{ infrastructure_state.rc | default(1) == 0 and (infrastructure_state.stdout | default('') | trim) in ['running', 'running healthy'] }}"
+
+- name: Recover failed {{ inspection_infra }} process without touching volumes
+  ansible.builtin.command:
+    argv: "{{ inspection_command + ['up', '-d', '--no-deps', '--no-build', '--force-recreate', inspection_infra] }}"
+    chdir: '{{ app_dir }}'
+  register: infrastructure_repair
+  failed_when: false
+  when: not (infrastructure_ok | bool) and repair_enabled | bool
+
+- name: Resolve recovered {{ inspection_infra }} container
+  ansible.builtin.command:
+    argv: "{{ inspection_command + ['ps', '-q', inspection_infra] }}"
+    chdir: '{{ app_dir }}'
+  register: infrastructure_new_id
+  changed_when: false
+  failed_when: false
+  when: not (infrastructure_ok | bool) and repair_enabled | bool
+
+- name: Recheck recovered {{ inspection_infra }} health
+  ansible.builtin.command:
+    argv: ['docker', 'inspect', '--format', '{{ "{{.State.Status}} {{if .State.Health}}{{.State.Health.Status}}{{end}}" }}', '{{ infrastructure_new_id.stdout | default("") | trim }}']
+  register: infrastructure_retry
+  changed_when: false
+  failed_when: false
+  until: infrastructure_retry.rc == 0 and infrastructure_retry.stdout | trim in ['running', 'running healthy']
+  retries: 6
+  delay: 5
+  when: not (infrastructure_ok | bool) and repair_enabled | bool and infrastructure_new_id.stdout | default('') | trim | length > 0
+
+- name: Record {{ inspection_infra }} infrastructure result
+  ansible.builtin.set_fact:
+    inspection_results: "{{ inspection_results + [{'feature': 'infrastructure-' + inspection_infra, 'status': ('passed' if infrastructure_ok | bool or (infrastructure_retry.rc | default(1) == 0 and infrastructure_retry.stdout | default('') | trim in ['running', 'running healthy']) else 'failed'), 'scope': 'Container process and configured Docker healthcheck only'}] }}"

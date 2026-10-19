@@ -1,8 +1,9 @@
 FROM node:20-alpine
 WORKDIR /app
-COPY package.json tsconfig.json ./
-RUN npm install
+COPY package.json package-lock.json tsconfig.json ./
+RUN npm ci --include=dev
 COPY src ./src
-RUN npx nest build
+COPY test ./test
+RUN npm run build && node --test test/*.cjs
 EXPOSE 4000
 CMD ["npm","run","start"]

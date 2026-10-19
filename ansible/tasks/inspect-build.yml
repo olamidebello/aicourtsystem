@@ -1,0 +1,32 @@
+---
+- name: Build and run regression tests for {{ inspection_service }}
+  ansible.builtin.command:
+    argv: "{{ inspection_command + ['build', inspection_service] }}"
+    chdir: '{{ app_dir }}'
+  register: service_build
+  failed_when: false
+  when: repair_enabled | bool
+
+- name: Retry failed build once with a clean Docker build cache
+  ansible.builtin.command:
+    argv: "{{ inspection_command + ['build', '--no-cache', inspection_service] }}"
+    chdir: '{{ app_dir }}'
+  register: service_rebuild
+  failed_when: false
+  when: repair_enabled | bool and service_build.rc != 0
+
+- name: Determine build status
+  ansible.builtin.set_fact:
+    build_ok: "{{ not (repair_enabled | bool) or service_build.rc | default(1) == 0 or service_rebuild.rc | default(1) == 0 }}"
+
+- name: Apply successfully built service while preserving volumes
+  ansible.builtin.command:
+    argv: "{{ inspection_command + ['up', '-d', '--no-deps', inspection_service] }}"
+    chdir: '{{ app_dir }}'
+  register: service_start
+  failed_when: false
+  when: repair_enabled | bool and build_ok | bool
+
+- name: Record service result
+  ansible.builtin.set_fact:
+    inspection_results: "{{ inspection_results + [{'feature': 'build-' + inspection_service, 'status': ('skipped' if not (repair_enabled | bool) else ('passed' if (build_ok | bool and service_start.rc | default(1) == 0) else 'failed')), 'scope': 'Build, regression tests and container start; inspect service logs if failed'}] }}"

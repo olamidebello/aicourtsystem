@@ -108,3 +108,9 @@ From the existing `/opt/aicourtsystem` checkout, run `git pull --ff-only` and `b
 Required DNS: `justisolve.com` A points to `181.214.149.146`; `www.justisolve.com` CNAME points to `justisolve.com` (or its A points to the same IP). Remove stale AAAA records unless IPv6 is configured separately. The publisher checks these records; it does not have DNS-provider credentials to change them. It refuses conflicting Nginx hostname definitions in other enabled files. Certificate renewal is managed by the installed Certbot setup. Optionally supply `-e tls_email=YOUR_OPERATOR_EMAIL`.
 
 Olamidepanel's GUI remains a read-only hosting inventory for this application. Publishing does not install a general-purpose terminal, create a hosting subscription, reset an admin password, configure email, or transfer AI API credentials to production. It verifies and registers the actual JustiSolve installation. If any step fails, share the named task error without including `.env` contents.
+
+## Account email and sequential inspection
+
+See the repository README's **Self-registration and password recovery** section for SMTP variables. Set them in the existing protected `.env` before deploying; no mail-provider credentials are assumed. Registration and recovery are unavailable until SMTP and an HTTPS public URL are configured. New registrations are email-verified ordinary users.
+
+Run `sudo bash scripts/inspect-and-repair.sh` after normal deployment to build/test API, web and AI sequentially, check each infrastructure container and inspect feature endpoints one by one. Safe repairs are bounded to clean rebuilds and container recovery; unresolved defects are reported for review. `-e repair_enabled=false` disables builds and restarts. Results are written to `inspection-reports/latest.json`; credentials and record bodies are excluded. See README for probe coverage and the remaining manual checks.

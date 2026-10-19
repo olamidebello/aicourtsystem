@@ -19,7 +19,7 @@ export class AdminController {
  }
  @Post('auth/login') async login(@Body() b:any,@Res({passthrough:true}) res:any){
   if(typeof b.password!=='string'||b.password.length>200||typeof b.email!=='string')throw new UnauthorizedException('Invalid credentials.');
-  const a=(await this.db.query('SELECT * FROM platform_accounts WHERE email=$1 AND active=true',[b.email.toLowerCase().trim()])).rows[0];
+  const a=(await this.db.query('SELECT * FROM platform_accounts WHERE email=$1 AND active=true AND email_verified=true',[b.email.toLowerCase().trim()])).rows[0];
   const valid=await passwordMatches(b.password,a?.password_hash||'dummy:'+('00'.repeat(64)));if(!a||!valid)throw new UnauthorizedException('Invalid credentials.');
   const token=randomBytes(32).toString('hex');await this.db.query("DELETE FROM platform_sessions WHERE expires_at<now()");await this.db.query("INSERT INTO platform_sessions(token_hash,account_id,expires_at) VALUES($1,$2,now()+interval '8 hours')",[digest(token),a.id]);
   res.cookie('justisolve_session',token,{httpOnly:true,secure:process.env.COOKIE_SECURE!=='false',sameSite:'strict',maxAge:8*3600000,path:'/api'});res.setHeader('Cache-Control','no-store');await this.audit(a.email,'login',a.id);return {id:a.id,email:a.email,name:a.name,role:a.role};

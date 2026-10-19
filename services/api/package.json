@@ -1,6 +1,31 @@
 {
-  "name":"justisolve-api","version":"2.0.0","private":true,
-  "scripts":{"build":"nest build","start":"node dist/main.js"},
-  "dependencies":{"@nestjs/common":"^10.4.5","@nestjs/core":"^10.4.5","@nestjs/platform-express":"^10.4.5","axios":"^1.7.9","express-rate-limit":"^7.4.1","helmet":"^7.1.0","minio":"^8.0.1","pg":"^8.13.1","reflect-metadata":"^0.2.2","rxjs":"^7.8.1"},
-  "devDependencies":{"@nestjs/cli":"^10.4.2","@types/node":"^22.10.2","@types/pg":"^8.11.10","typescript":"^5.6.3"}
+  "name": "justisolve-api",
+  "version": "2.0.0",
+  "private": true,
+  "scripts": {
+    "build": "nest build",
+    "start": "node dist/main.js",
+    "test": "node --test test/*.cjs"
+  },
+  "dependencies": {
+    "@nestjs/common": "^10.4.5",
+    "@nestjs/core": "^10.4.5",
+    "@nestjs/platform-express": "^10.4.5",
+    "axios": "^1.7.9",
+    "express-rate-limit": "^7.4.1",
+    "helmet": "^7.1.0",
+    "minio": "^8.0.1",
+    "nodemailer": "^7.0.13",
+    "pg": "^8.13.1",
+    "reflect-metadata": "^0.2.2",
+    "rxjs": "^7.8.1"
+  },
+  "devDependencies": {
+    "@electric-sql/pglite": "^0.5.10",
+    "@nestjs/cli": "^10.4.2",
+    "@types/node": "^22.10.2",
+    "@types/nodemailer": "^8.0.2",
+    "@types/pg": "^8.11.10",
+    "typescript": "^5.6.3"
+  }
 }
