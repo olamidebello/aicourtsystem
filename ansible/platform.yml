@@ -1,0 +1,124 @@
+---
+# Optional vars should be supplied in a root-readable vars/Vault file.
+- name: Build and deploy JustiSolve
+  ansible.builtin.import_playbook: hosting.yml
+
+- name: Initialize AI models and automate platform operations
+  hosts: all
+  become: true
+  vars:
+    app_dir: /opt/aicourtsystem
+    compose_project: docker
+    install_ollama_models: true
+    enable_auto_updates: false
+    update_calendar: '*-*-* 03:30:00'
+  tasks:
+    - name: Detect Compose plugin
+      ansible.builtin.command: docker compose version
+      register: plugin
+      changed_when: false
+      failed_when: false
+
+    - name: Select Compose command
+      ansible.builtin.set_fact:
+        platform_compose: "{{ 'docker compose' if plugin.rc == 0 else 'docker-compose' }}"
+
+    - name: Validate automation configuration
+      ansible.builtin.assert:
+        that:
+          - app_dir is match('^/[A-Za-z0-9/_-]+$')
+          - compose_project is match('^[a-z0-9][a-z0-9_-]*$')
+          - "'\n' not in update_calendar"
+          - "'\r' not in update_calendar"
+
+    - name: Read configured local models from AI container
+      ansible.builtin.command:
+        cmd: >-
+          {{ platform_compose }} -p {{ compose_project }} --env-file .env -f docker/docker-compose.yml
+          exec -T ai python -c "import os,json; print(json.dumps([m.strip() for m in os.getenv('OLLAMA_DRAFT_MODELS',os.getenv('OLLAMA_MODEL','llama3.2:3b')).split(',') if m.strip()][:4]))"
+        chdir: '{{ app_dir }}'
+      register: model_config
+      changed_when: false
+      when: install_ollama_models | bool
+
+    - name: Download configured local AI models (may require substantial disk and RAM)
+      ansible.builtin.command:
+        argv: "{{ platform_compose.split() + ['-p', compose_project, '--env-file', '.env', '-f', 'docker/docker-compose.yml', 'exec', '-T', 'ollama', 'ollama', 'pull', item] }}"
+        chdir: '{{ app_dir }}'
+      loop: '{{ (model_config.stdout | default("[]")) | from_json }}'
+      when: install_ollama_models | bool
+      async: 3600
+      poll: 10
+
+    - name: Check PACER integration route
+      ansible.builtin.command:
+        cmd: >-
+          {{ platform_compose }} -p {{ compose_project }} --env-file .env -f docker/docker-compose.yml
+          exec -T api node -e "fetch('http://127.0.0.1:4000/api/pacer/info').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"
+        chdir: '{{ app_dir }}'
+      changed_when: false
+
+    - name: Check AI provider configuration route without exposing credentials
+      ansible.builtin.command:
+        cmd: >-
+          {{ platform_compose }} -p {{ compose_project }} --env-file .env -f docker/docker-compose.yml
+          exec -T api node -e "fetch('http://127.0.0.1:4000/api/ai/providers').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"
+        chdir: '{{ app_dir }}'
+      changed_when: false
+
+    - name: Create automation configuration directory
+      ansible.builtin.file:
+        path: /etc/justisolve
+        state: directory
+        mode: '0700'
+
+    - name: Preserve automation choices for scheduled runs
+      ansible.builtin.copy:
+        dest: /etc/justisolve/automation.yml
+        mode: '0600'
+        content: "{{ {'app_dir': app_dir, 'compose_project': compose_project, 'enable_auto_updates': enable_auto_updates | bool, 'install_ollama_models': install_ollama_models | bool, 'update_calendar': update_calendar, 'domain': domain | default('justisolve.com'), 'public_ip': public_ip | default('181.214.149.146'), 'enable_https': enable_https | default(true) | bool, 'repo_ref': repo_ref | default('main')} | to_nice_yaml }}"
+
+    - name: Install platform update service
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/justisolve-update.service
+        mode: '0644'
+        content: |
+          [Unit]
+          Description=Build and deploy JustiSolve with health checks
+          After=network-online.target docker.service
+          Wants=network-online.target
+          [Service]
+          Type=oneshot
+          WorkingDirectory={{ app_dir }}
+          ExecStart=/bin/bash {{ app_dir }}/scripts/deploy.sh
+          TimeoutStartSec=7200
+          UMask=0077
+
+    - name: Install optional update timer
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/justisolve-update.timer
+        mode: '0644'
+        content: |
+          [Unit]
+          Description=Scheduled JustiSolve updates
+          [Timer]
+          OnCalendar={{ update_calendar }}
+          RandomizedDelaySec=600
+          Persistent=true
+          [Install]
+          WantedBy=timers.target
+
+    - name: Set update timer state explicitly
+      ansible.builtin.systemd:
+        name: justisolve-update.timer
+        enabled: '{{ enable_auto_updates | bool }}'
+        state: "{{ 'started' if enable_auto_updates | bool else 'stopped' }}"
+        daemon_reload: true
+
+    - name: Report deployment status
+      ansible.builtin.debug:
+        msg: >-
+          JustiSolve build and endpoint checks passed. Local models were initialized if enabled.
+          Scheduled updates enabled={{ enable_auto_updates | bool }} (server timezone).
+          Hosted AI models still require API keys and supported model IDs in the existing .env.
+          No PACER searches, AI drafting requests or court filings run unattended.
