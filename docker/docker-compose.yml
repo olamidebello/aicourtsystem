@@ -58,7 +58,15 @@ services:
     restart: unless-stopped
   ai:
     build: { context: ../services/ai }
-    environment: { OLLAMA_BASE_URL: "http://ollama:11434", OLLAMA_MODEL: "${OLLAMA_MODEL:-llama3.2:3b}" }
+    environment:
+      OLLAMA_BASE_URL: "http://ollama:11434"
+      OLLAMA_MODEL: "${OLLAMA_MODEL:-llama3.2:3b}"
+      OLLAMA_DRAFT_MODELS: "${OLLAMA_DRAFT_MODELS:-llama3.2:3b}"
+      OPENAI_API_KEY: "${OPENAI_API_KEY:-}"
+      OPENAI_MODEL: "${OPENAI_MODEL:-}"
+      ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY:-}"
+      ANTHROPIC_MODEL: "${ANTHROPIC_MODEL:-}"
+      # Provider credentials remain server-side.
     depends_on: [ollama]
     restart: unless-stopped
   api:

@@ -1,9 +1,11 @@
 'use client';
+import Ensemble from './ensemble';
+import Pacer from './pacer';
 import {useEffect,useMemo,useState} from 'react';
 
 const modules=[
- ['dashboard','Dashboard'],['cases','Cases'],['dockets','Dockets'],['documents','Documents'],['evidence','Evidence'],
- ['transcripts','Transcripts'],['research','Legal Research'],['draft','AI Drafting'],['analyze','AI Analysis'],
+ ['dashboard','Dashboard'],['pacer','PACER Records'],['cases','Cases'],['dockets','Dockets'],['documents','Documents'],['evidence','Evidence'],
+ ['transcripts','Transcripts'],['research','Legal Research'],['draft','AI Drafting'],['ensemble','Multi-model Motions'],['analyze','AI Analysis'],
  ['tasks','Tasks'],['deadlines','Deadlines'],['alerts','Alerts'],['audit','Audit & Compliance'],['admin','Administration']
 ];
 
@@ -32,6 +34,8 @@ export default function Home(){
    </header>
    {error&&<div className="panel error" role="alert">{error}</div>}
    {busy&&<div className="notice">Working…</div>}
+   {tab==='pacer'&&<Pacer api={API}/>}
+   {tab==='ensemble'&&<Ensemble api={API}/>}
    {tab==='dashboard'&&<section className="cards">{['cases','documents','evidence','tasks','deadlines','alerts'].map(k=><article key={k}><small>{k.toUpperCase()}</small><strong>{data?.[k]??'—'}</strong><span>Current workspace</span></article>)}</section>}
    {tab==='dashboard'&&<section className="panel"><h2>Quick Actions</h2><div className="actions"><button onClick={()=>setTab('cases')}>New case</button><button onClick={()=>setTab('evidence')}>Evidence</button><button onClick={()=>setTab('analyze')}>Analyze record</button><button onClick={()=>setTab('draft')}>Draft filing</button><button onClick={()=>setTab('deadlines')}>Deadlines</button><button onClick={()=>setTab('research')}>Research</button></div></section>}
    {tab==='cases'&&<><section className="panel"><h2>Create Case</h2><div className="formGrid">{Object.keys(form).map(k=><input key={k} placeholder={k.replaceAll('_',' ')} value={form[k]} onChange={e=>setForm({...form,[k]:e.target.value})}/>)}</div><button className="primary" disabled={busy} onClick={addCase}>Create Case</button></section><Table data={data}/></>}

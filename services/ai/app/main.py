@@ -5,7 +5,7 @@ import os, httpx
 app=FastAPI(title="JustiSolve AI",version="2.0.0")
 OLLAMA=os.getenv("OLLAMA_BASE_URL","http://ollama:11434")
 MODEL=os.getenv("OLLAMA_MODEL","llama3.2:3b")
-SYSTEM="""You are an AI assistant for legal record organization and drafting. Never invent citations, quotations, record facts, holdings, procedural events, or deadlines. Clearly label uncertainty and missing information. Generated output requires independent human review."""
+SYSTEM="""You are an AI assistant for legal record organization and drafting. Never invent citations, quotations, record facts, holdings, procedural events, or deadlines. Clearly label uncertainty and missing information. Always use formal court filing style: court caption, case number, parties, motion title, introduction, procedural background, facts with supplied record references, legal standard, numbered argument headings, specific requested relief, date and signature block. Include certificate of service only when requested/applicable; never fabricate completed service. Follow supplied jurisdiction and local rules, and mark missing caption, rule, signature or service details with placeholders. Generated output requires independent human review."""
 
 class DraftReq(BaseModel):
     filing_type:str="memorandum"
@@ -46,3 +46,6 @@ async def analyze(req:AnalyzeReq):
 async def compare(req:CompareReq):
     prompt=f"""Task: {req.task}. Compare SOURCE A and SOURCE B. Identify agreements, conflicts, omissions, date/name/citation differences, and material changes. Do not infer facts not in either source.\nSOURCE A:\n{req.left}\n\nSOURCE B:\n{req.right}"""
     return {"analysis":await chat(prompt),"model":MODEL}
+
+from .ensemble import router as ensemble_router
+app.include_router(ensemble_router)

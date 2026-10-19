@@ -586,3 +586,27 @@ Use focused branches and pull requests for significant changes. Include tests an
 ## License
 
 Add the project's chosen license before third-party distribution or external contributions.
+
+## PACER integration
+
+Open **PACER Records**, connect with your own PACER username/password and optional MFA and client billing codes, then search by case number or title. Production searches are billable: approve each search page explicitly. The response shows PACER's fee and billable-page receipt. QA requires a separate PACER QA account.
+
+Import selected case details into **Cases** with PACER court/case identifiers, source link, environment and import timestamp in metadata. Existing matching records are detected in the UI. Court links open in a new tab for docket reports and PDFs. **This integration does not automatically download full docket reports or filing PDFs**; the official Case Locator API is an index, not a uniform document-retrieval API. Court-specific retrieval adapters are still required for automated document downloads.
+
+PACER passwords/MFA codes are never persisted. The backend keeps PACER tokens in memory for up to 20 minutes and gives the browser a separate random connection handle held only in component memory. Disconnect attempts PACER logout and always removes the local session. No automated retries are made for billable calls. Use HTTPS and exclude request bodies/authorization headers from proxy or infrastructure logs. PACER integration does not implement the platform's missing authentication/tenant-isolation layer: deploy only behind authenticated access until application-wide authorization is completed. Do not expose the existing case APIs publicly for sensitive legal records.
+
+API routes: `POST /api/pacer/connect`, `POST /api/pacer/search`, `POST /api/pacer/disconnect`, `GET /api/pacer/info`. Search/disconnect use `Authorization: Bearer <connection handle>`. Only fixed official PACER endpoints are contacted; redirects are rejected. Source links are restricted to HTTPS court hosts. Sessions are process-local: use sticky routing for multiple API replicas. No live PACER account was used in automated tests.
+
+References: [PACER developer resources](https://pacer.uscourts.gov/file-case/developer-resources), [authentication guide](https://pacer.uscourts.gov/help/pacer/pacer-authentication-api-user-guide), [Case Locator API guide](https://pacer.uscourts.gov/help/pacer/pacer-case-locator-pcl-api-user-guide).
+
+## Multi-model motion drafting and quality target
+
+**Multi-model Motions** runs 2–4 selected models independently, merges their drafts, reviews the merge, revises it against the review, then reviews the revision. It retains the higher-scoring version and exposes the original drafts, merge and review rubric. The configurable quality target defaults to 90/100. A target is never guaranteed: after one revision the UI reports whether it was achieved. Scores cover source fidelity, authority support, structure, relief and clarity, each 0–20. They are AI self-assessments, not independently validated legal ratings or predictions of judicial outcomes. Missing facts and citations require human verification. Refinement does not train or fine-tune model weights.
+
+Set `OPENAI_API_KEY`/`OPENAI_MODEL` and `ANTHROPIC_API_KEY`/`ANTHROPIC_MODEL` in the server `.env` to enable hosted models. No credentials are bundled. Configure additional locally hosted open models with comma-separated `OLLAMA_DRAFT_MODELS` and install each model in Ollama; the provider list reflects configuration, not live model availability. Model IDs must be supported by the relevant account. Hosted calls use OpenAI Responses and Anthropic Messages APIs. External transmission requires explicit per-request consent; selected source material and model drafts are shared with the selected providers, with extra calls to the synthesis provider. Keys stay server-side. OpenAI requests use `store:false`; this does not override providers' service-wide data policies. API charges apply. No live hosted-provider calls were made during development.
+
+Upstream timeouts allow up to 15 minutes for the bounded pipeline. Run behind authenticated access; application-wide authentication, tenant authorization and per-user spending controls remain deployment prerequisites. Do not expose server-funded AI routes publicly. The workflow does not automatically fetch or verify legal authorities or file anything with a court. Inputs are limited to 4,000 request characters and 24,000 source characters. Drafts remain in the current page until downloaded; switching modules or reloading clears the workspace.
+
+Validation: `cd services/api && npm run build && node --test test/pacer.cjs`; `cd services/web && npm run build`; `cd services/ai && python -m unittest discover -s tests`.
+
+All motion drafting defaults to formal court filing structure. Multi-model requests require the court/jurisdiction and accept case number, caption parties and local-rule instructions. Missing information remains explicit. Markdown output is a drafting format, not a typeset filing; verify pagination, typography, signatures, service and the particular court's current rules before filing.
