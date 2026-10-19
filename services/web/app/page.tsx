@@ -14,20 +14,24 @@ const modules=[
 ];
 
 export default function Home(){
+ return <AuthGate><Workspace/></AuthGate>;
+}
+
+function Workspace(){
  const API=useMemo(()=>process.env.NEXT_PUBLIC_API_BASE_URL||'/api',[]);
  const [tab,setTab]=useState('dashboard'),[data,setData]=useState<any>(null),[busy,setBusy]=useState(false),[q,setQ]=useState('');
  const [form,setForm]=useState<any>({case_number:'',court_name:'',court_level:'federal',title:'',status:'open',stage:''});
  const [error,setError]=useState('');
  const [aiText,setAiText]=useState(''),[aiResult,setAiResult]=useState('');
- async function get(path:string){const r=await fetch(API+path);if(!r.ok)throw new Error(await r.text());return r.json()}
- async function post(path:string,body:any){const r=await fetch(API+path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});if(!r.ok)throw new Error(await r.text());return r.json()}
+ async function get(path:string){const r=await fetch(API+path);return readResponse(r)}
+ async function post(path:string,body:any){const r=await fetch(API+path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});return readResponse(r)}
  async function load(){if(tab==='search')return;setBusy(true);setError('');try{if(tab==='dashboard')setData(await get('/dashboard'));else if(['cases','dockets','documents','evidence','transcripts','research','tasks','deadlines','alerts','audit'].includes(tab))setData(await get('/'+tab));else setData(null)}catch(e:any){setError(e.message||'Unable to load records.')}finally{setBusy(false)}}
  useEffect(()=>{load()},[tab]);
  async function addCase(){if(!form.case_number.trim()||!form.title.trim()){setError('Enter a case number and title.');return}setBusy(true);setError('');try{await post('/cases',form);setForm({case_number:'',court_name:'',court_level:'federal',title:'',status:'open',stage:''});await load()}catch(e:any){setError(e.message||'Unable to create case.')}finally{setBusy(false)}}
  async function analyze(){setBusy(true);setError('');setAiResult('');try{const r=await post('/ai/analyze',{text:aiText,task:'legal record analysis'});setAiResult(r.analysis)}catch(e:any){setError(e.message||'AI analysis failed.')}finally{setBusy(false)}}
  async function draft(){setBusy(true);setError('');setAiResult('');try{const r=await post('/ai/draft',{filing_type:'legal memorandum',inputs:{source:aiText},tone:'formal'});setAiResult(r.draft_markdown)}catch(e:any){setError(e.message||'Draft generation failed.')}finally{setBusy(false)}}
  async function search(){if(!q.trim())return;setBusy(true);setError('');try{setData(await get('/search?q='+encodeURIComponent(q)));setTab('search')}catch(e:any){setError(e.message||'Search failed.')}finally{setBusy(false)}}
- return <AuthGate><div className="shell">
+ return <div className="shell">
   <aside><div className="brand"><img className="brandLogo" src="/justisolve-logo.png" alt="JustiSolve — Intelligent Solutions. Fairer Justice." width={1536} height={1024}/><span className="brandSlogan">Intelligent Solutions. Fairer Justice.</span></div>
    <nav>{modules.map(([id,label])=><button key={id} className={tab===id?'active':''} onClick={()=>setTab(id)}>{label}</button>)}</nav>
    <div className="asideFoot"><span>Service status unverified</span><small>Development workspace</small></div>
@@ -50,6 +54,15 @@ export default function Home(){
    {tab==='admin'&&<Admin api={API}/>}
    <footer><a href="/news">News</a> · <a href="/policies">Terms, Privacy & AI Policies</a></footer>
   </main>
- </div></AuthGate>
+ </div>
+}
+async function readResponse(r:Response){
+ if(!r.ok){
+  if(r.status===401)throw new Error('Your session has expired. Reload the page and sign in again.');
+  let message='Unable to complete the request. Please try again.';
+  try{const data=await r.json();if(typeof data.message==='string')message=data.message;}catch{}
+  throw new Error(message);
+ }
+ return r.json();
 }
 function Table({data}:{data:any}){if(data?.error)return <section className="panel error">{data.error}</section>;if(!Array.isArray(data))return null;if(!data.length)return <section className="panel muted">No records yet.</section>;const keys=Object.keys(data[0]).slice(0,7);return <section className="panel tableWrap"><table><thead><tr>{keys.map(k=><th key={k}>{k.replaceAll('_',' ')}</th>)}</tr></thead><tbody>{data.map((r:any,i:number)=><tr key={i}>{keys.map(k=><td key={k}>{typeof r[k]==='object'?JSON.stringify(r[k]):String(r[k]??'')}</td>)}</tr>)}</tbody></table></section>}
