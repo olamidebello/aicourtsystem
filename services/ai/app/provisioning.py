@@ -4,6 +4,7 @@ import httpx
 from fastapi import APIRouter, HTTPException, Header
 from pydantic import BaseModel, Field
 router=APIRouter()
+from .model_catalog import text_model,latest_models
 
 def configuration():
     token=os.getenv('AI_CONFIG_TOKEN','')
@@ -32,8 +33,11 @@ def effective(provider,config=None):
     if override is not None:
         key=override.get('api_key','') or (key if override.get('use_server_key',False) else '')
         model=override.get('model','')
+    names=([model] if model else []) if override is None else override.get('models',([model] if model else []))
+    names=latest_models(provider,[m for m in names if text_model(provider,m)],(override or {}).get('model_created',{}))
+    model=names[0] if names else ''
     enabled=bool(key and model) and (override is None or override.get('enabled',False))
-    return {'api_key':key,'model':model,'enabled':enabled,'key_configured':bool(key),'source':'server environment' if override is None else 'super admin'}
+    return {'api_key':key,'models':names,'model':model,'enabled':enabled,'key_configured':bool(key),'source':'server environment' if override is None else 'super admin'}
 
 def authorize(token):
     expected=os.getenv('AI_CONFIG_TOKEN','')
@@ -57,9 +61,12 @@ async def models(provider:str,x_ai_config_token:str=Header(default='')):
             r.raise_for_status()
             values=r.json().get('models' if provider=='ollama' else 'data',[])
             names=sorted({x.get('name' if provider=='ollama' else 'id','') for x in values if isinstance(x,dict)})
-            selected=cfg.get('models',[]) if provider=='ollama' else [cfg.get('model','')]
+            selected=cfg.get('models',[])
+            compatible=[m for m in names if m and text_model(provider,m)]
+            created={x.get('id'):x.get('created',0) for x in values if isinstance(x,dict)}
+            compatible=latest_models(provider,compatible,created)
             ready=all(m in names or (provider=='ollama' and m+':latest' in names) for m in selected) and bool(selected)
-            return {'status':'ready' if ready else 'warning','models':[m for m in names if m],'message':'Connection verified; selected models found.' if ready else 'Connection verified. Select an available model. Model listing does not verify generation capability or available quota.'}
+            return {'status':'ready' if ready else 'warning','models':[m for m in names if m],'compatible_models':compatible,'model_created':{m:created.get(m,0) for m in compatible},'latest_model':compatible[0] if compatible else '','message':'Connection verified; selected models found.' if ready else 'Connection verified. Select an available model. Model listing does not verify generation capability or available quota.'}
     except Exception:
         raise HTTPException(502,'Provider connection failed. Check saved credentials, model access and network.')
 

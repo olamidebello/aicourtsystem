@@ -12,13 +12,24 @@ from .provisioning import configuration, effective
 def providers():
     config=configuration()
     result={}
-    for p,label in [('openai','OpenAI (ChatGPT models)'),('claude','Claude')]:
+    for p,label in [('openai','OpenAI'),('claude','Claude')]:
         cfg=effective(p,config)
-        result[p]={'label':label,**cfg,'external':True}
+        result[p]={'label':label,**cfg,'external':True,'vendor':p,'alias':True}
+        for model in cfg['models']:
+            result[p+':'+model]={'label':label+' / '+model,**cfg,'model':model,'external':True,'vendor':p}
     local=effective('ollama',config)
     for model in local['models']:
-        result['ollama:'+model]={'label':'Ollama / '+model,'model':model,'enabled':local['enabled'],'external':False,'source':'super admin' if 'ollama' in config else 'server environment'}
+        result['ollama:'+model]={'label':'Ollama / '+model,'model':model,'enabled':local['enabled'],'external':False,'vendor':'ollama','source':'super admin' if 'ollama' in config else 'server environment'}
+    default=next((p for p,cfg in result.items() if cfg['enabled'] and not cfg.get('alias')),None)
+    for p,cfg in result.items():cfg['is_default']=p==default
     return result
+
+def resolve(provider='',allow_external=False):
+    cfg=providers()
+    selected=provider if provider and provider!='latest' else next((p for p,c in cfg.items() if c.get('is_default') and c['enabled']),None)
+    if not selected or selected not in cfg or not cfg[selected]['enabled']:raise HTTPException(400,'Select an enabled provisioned AI model.')
+    if cfg[selected]['external'] and not allow_external:raise HTTPException(400,'Authorize external AI processing before sending source material.')
+    return selected,cfg[selected]
 
 class Request(BaseModel):
     request:str=Field(min_length=10,max_length=4000)
@@ -36,12 +47,12 @@ async def generate(provider,prompt,system=SYSTEM):
     cfg=providers().get(provider)
     if not cfg or not cfg['enabled']: raise ValueError('Provider not configured')
     async with httpx.AsyncClient(timeout=180,follow_redirects=False) as c:
-        if provider=='openai':
+        if cfg.get('vendor',provider.split(':')[0])=='openai':
             r=await c.post('https://api.openai.com/v1/responses',headers={'Authorization':'Bearer '+cfg['api_key']},json={'model':cfg['model'],'instructions':system,'input':prompt,'max_output_tokens':6000,'store':False})
             r.raise_for_status();d=r.json()
             if d.get('status')!='completed':raise ValueError('Incomplete output')
             text='\n'.join(x.get('text','') for item in d.get('output',[]) if item.get('type')=='message' for x in item.get('content',[]) if x.get('type')=='output_text')
-        elif provider=='claude':
+        elif cfg.get('vendor',provider.split(':')[0])=='claude':
             r=await c.post('https://api.anthropic.com/v1/messages',headers={'x-api-key':cfg['api_key'],'anthropic-version':'2023-06-01'},json={'model':cfg['model'],'system':system,'messages':[{'role':'user','content':prompt}],'max_tokens':6000})
             r.raise_for_status();d=r.json()
             if d.get('stop_reason')!='end_turn':raise ValueError('Incomplete output')
@@ -67,7 +78,7 @@ async def review(provider,source,draft):
     except Exception:raise ValueError('Review returned invalid scoring data')
 
 @router.get('/providers')
-def available():return [{'id':k,**{name:value for name,value in v.items() if name!='api_key'}} for k,v in providers().items()]
+def available():return [{'id':k,**{name:value for name,value in v.items() if name not in ['api_key','models']}} for k,v in providers().items() if not v.get('alias')]
 
 @router.post('/ensemble')
 async def ensemble(req:Request):

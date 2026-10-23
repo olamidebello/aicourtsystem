@@ -13,8 +13,8 @@ export class IntakeController {
  }
  @Post() @UseInterceptors(FilesInterceptor('files',5,{limits:{fileSize:10000000,fields:5,fieldSize:15000}}))
  async submit(@Body() b:any,@UploadedFiles() files:any[],@Req() req:any){
-  files=files||[];if(typeof b.narrative!=='string'||b.narrative.trim().length<20||b.narrative.length>12000||typeof b.provider!=='string'||b.provider.length>100||(b.jurisdiction||'').length>300||files.reduce((n,f)=>n+f.size,0)>20000000||files.some(f=>!/^.+\.(pdf|docx|txt)$/i.test(f.originalname)))throw new BadRequestException('Narrative of 20–12000 characters and up to five PDF/DOCX/TXT files (10 MB each, 20 MB total) required.');
-  const allow=b.allow_external==='true';if(['openai','claude'].includes(b.provider)&&!allow)throw new BadRequestException('Authorize external processing.');
+  files=files||[];if(typeof b.narrative!=='string'||b.narrative.trim().length<20||b.narrative.length>12000||typeof b.provider!=='string'||b.provider.length>220||(b.jurisdiction||'').length>300||files.reduce((n,f)=>n+f.size,0)>20000000||files.some(f=>!/^.+\.(pdf|docx|txt)$/i.test(f.originalname)))throw new BadRequestException('Narrative of 20–12000 characters and up to five PDF/DOCX/TXT files (10 MB each, 20 MB total) required.');
+  const allow=b.allow_external==='true';if(['openai','claude'].includes(b.provider.split(':')[0])&&!allow)throw new BadRequestException('Authorize external processing.');
   const id=(await this.db.query('INSERT INTO case_intakes(account_id,narrative,jurisdiction,provider) VALUES($1,$2,$3,$4) RETURNING id',[req.admin.id,b.narrative,b.jurisdiction||'',b.provider])).rows[0].id;const stored=[];
   try{
    const storage=this.storage(),bucket=process.env.MINIO_BUCKET_EVIDENCE||'evidence';if(files.length&&!await storage.bucketExists(bucket))await storage.makeBucket(bucket);
