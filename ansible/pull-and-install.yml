@@ -1,0 +1,58 @@
+---
+# Run with ansible-pull into a separate bootstrap directory; production .env stays in app_dir.
+- name: Pull JustiSolve updates into the existing server installation
+  hosts: all
+  become: true
+  vars:
+    app_dir: /opt/aicourtsystem
+    repo_url: https://github.com/olamidebello/justisolve.git
+    repo_ref: main
+  tasks:
+    - name: Validate production checkout path
+      ansible.builtin.assert:
+        that:
+          - app_dir is match('^/[A-Za-z0-9/_-]+$')
+          - app_dir != '/'
+          - repo_url == 'https://github.com/olamidebello/justisolve.git'
+          - repo_ref is match('^[A-Za-z0-9][A-Za-z0-9/_.-]*$')
+        fail_msg: 'Use the existing JustiSolve installation path and a valid repository ref.'
+
+    - name: Install pull prerequisites
+      ansible.builtin.apt:
+        name: [git, python3]
+        state: present
+        update_cache: true
+        cache_valid_time: 3600
+
+    - name: Locate existing application environment
+      ansible.builtin.stat:
+        path: '{{ app_dir }}/.env'
+      register: production_environment
+
+    - name: Require the existing installation before applying the update
+      ansible.builtin.assert:
+        that:
+          - production_environment.stat.exists
+          - production_environment.stat.isreg
+        fail_msg: 'Existing JustiSolve .env not found. Set app_dir to the actual production checkout. For a new server, run ansible/hosting.yml first.'
+
+    - name: Verify Docker is installed and running
+      ansible.builtin.command: docker info
+      changed_when: false
+      no_log: true
+
+    - name: Pull source without discarding local tracked changes
+      ansible.builtin.git:
+        repo: '{{ repo_url }}'
+        dest: '{{ app_dir }}'
+        version: '{{ repo_ref }}'
+        update: true
+        force: false
+      register: pulled_source
+
+    - name: Report the installed source revision
+      ansible.builtin.debug:
+        msg: 'Deploying JustiSolve revision {{ pulled_source.after }}. Existing environment and database volumes are preserved.'
+
+- name: Install marketplace and PACER updates and verify application health
+  ansible.builtin.import_playbook: commerce.yml

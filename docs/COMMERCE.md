@@ -1,6 +1,14 @@
 # Marketplace and PACER billing
 
-Deploy from the existing server checkout (the default app directory is `/opt/aicourtsystem`):
+Pull and install in one command on the existing server as root (default production checkout: `/opt/aicourtsystem`):
+
+```bash
+ansible-pull -U https://github.com/olamidebello/justisolve.git -C main -d /opt/justisolve-bootstrap -i localhost, -c local ansible/pull-and-install.yml
+```
+
+If Ansible is not installed, run `apt-get update && apt-get install -y ansible git` first. For a different production checkout append `-e app_dir=/actual/checkout`. For a different existing Compose project append `-e compose_project=yourproject`. The bootstrap checkout is separate from production; do not set it to the production path. The playbook pulls `main` into the production checkout, refuses to discard tracked local changes, then installs and checks the update. It requires the existing `.env` and a running Docker installation; for a new server use `ansible/hosting.yml` first. This updates JustiSolve API/web; it does not reconfigure other domains or download AI models.
+
+Alternatively, deploy directly from the existing server checkout:
 
 ```bash
 git pull --ff-only
