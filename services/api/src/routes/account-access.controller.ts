@@ -3,24 +3,27 @@ import { randomBytes } from 'crypto';
 import { DbService } from '../db.service';
 import { AccountMailer } from '../account-mailer';
 import { digest, passwordHash } from '../auth';
+const registrationMessage={message:'Registration request received. If a new account was created, verify your email before signing in. If no verification email arrives, ask the site administrator to approve your account. Existing users can sign in or request password recovery.'};
 const generic={message:'If the account is eligible, an email will arrive shortly. Check your inbox and spam folder.'};
-function emailInput(value:any){if(typeof value!=='string'||value.length>254||!/^\S+@\S+\.\S+$/.test(value)||/[\r\n]/.test(value))throw new BadRequestException('Enter a valid email address.');return value.toLowerCase().trim();}
+function emailInput(value:any){if(typeof value!=='string')throw new BadRequestException('Enter a valid email address.');const email=value.trim().toLowerCase();if(email.length>254||!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)||/[\r\n]/.test(value))throw new BadRequestException('Enter a valid email address.');return email;}
+
 function passwordInput(value:any){if(typeof value!=='string'||value.length<14||value.length>200)throw new BadRequestException('Use a password of 14–200 characters.');}
 @Controller('admin/auth')
 export class AccountAccessController {
  constructor(private db:DbService,private mail:AccountMailer){}
- @Get('options') options(){return {registrationAvailable:process.env.ALLOW_REGISTRATION!=='false'&&this.mail.configured(),resetAvailable:this.mail.configured()};}
+ @Get('options') options(){return {registrationAvailable:process.env.ALLOW_REGISTRATION!=='false',verificationMethod:this.mail.configured()?'email':'admin',resetAvailable:this.mail.configured()};}
  private available(){if(!this.mail.configured())throw new ServiceUnavailableException('Account email is unavailable. Contact the site administrator.');}
  @Post('register') async register(@Body() b:any){
-  this.available();if(process.env.ALLOW_REGISTRATION==='false')throw new ServiceUnavailableException('Registration is currently closed.');
+  if(process.env.ALLOW_REGISTRATION==='false')throw new ServiceUnavailableException('Registration is currently closed.');
   const email=emailInput(b.email);passwordInput(b.password);
   if(typeof b.name!=='string'||!b.name.trim()||b.name.length>200)throw new BadRequestException('Enter your name (up to 200 characters).');
   // Public registration cannot claim the initial administrator or request an elevated role.
   if(!Number((await this.db.query("SELECT count(*) n FROM platform_accounts WHERE role='super_admin'")).rows[0].n))throw new ServiceUnavailableException('The administrator must finish initial setup first.');
   const hash=await passwordHash(b.password);
   const a=(await this.db.query("INSERT INTO platform_accounts(email,name,password_hash,role,email_verified) VALUES($1,$2,$3,'user',false) ON CONFLICT(email) DO NOTHING RETURNING id,email",[email,b.name.trim(),hash])).rows[0];
-  if(a)await this.issue(a,'verify');
-  return generic;
+  const pending=a||(await this.db.query("SELECT id,email FROM platform_accounts WHERE email=$1 AND active=true AND role='user' AND email_verified=false AND admin_approved=false",[email])).rows[0];
+  if(pending&&this.mail.configured())await this.issue(pending,'verify');
+  return registrationMessage;
  }
  private async issue(account:any,purpose:'verify'|'reset'){
   const token=randomBytes(32).toString('hex'),hash=digest(token);

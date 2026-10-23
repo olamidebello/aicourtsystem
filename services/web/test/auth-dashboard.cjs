@@ -119,3 +119,9 @@ test('password reset reads token from fragment and clears it from the address',a
   assert.equal(tree.root.findByType('h1').children[0],'Sign In');
  }finally{if(tree)act(()=>tree.unmount());global.fetch=originalFetch;window.location.hash='';}
 });
+
+test('Create account opens a usable pending-approval form when SMTP is not configured',async()=>{
+ const old=global.fetch;let tree;
+ global.fetch=async path=>path.endsWith('/me')?response(null,401):path.endsWith('/status')?response({setupRequired:false}):response({registrationAvailable:true,resetAvailable:false,verificationMethod:'admin'});
+ try{await act(async()=>{tree=create(React.createElement(Home));await flush();});const button=tree.root.findAllByType('button').find(b=>b.children.includes('Create account'));assert.equal(button.props.disabled,false);act(()=>button.props.onClick());assert.equal(tree.root.findByType('h1').children[0],'Create Account');assert.match(JSON.stringify(tree.toJSON()),/administrator must approve/);assert.equal(tree.root.findAllByType('input').filter(i=>i.props.type==='password').length,2);}finally{if(tree)act(()=>tree.unmount());global.fetch=old;}
+});

@@ -45,7 +45,7 @@ export class CommerceAdminController {
   if(!/^\d+$/.test(String(b.account_id))||typeof b.name!=='string'||!b.name.trim()||b.name.length>100||!Array.isArray(b.scopes)||!b.scopes.length||b.scopes.some(x=>!['pacer','wallet'].includes(x)))throw new BadRequestException('Account, name and supported API scopes required.');
   const days=integer(b.expires_days,1,365),id=randomUUID(),token='js_'+randomBytes(32).toString('hex');
   await this.c.transaction(async db=>{
-   if(!(await db.query('SELECT id FROM platform_accounts WHERE id=$1 AND active=true AND email_verified=true FOR UPDATE',[b.account_id])).rows.length)throw new BadRequestException('An active verified account is required.');
+   if(!(await db.query('SELECT id FROM platform_accounts WHERE id=$1 AND active=true AND (email_verified=true OR admin_approved=true) FOR UPDATE',[b.account_id])).rows.length)throw new BadRequestException('An active email-verified or administrator-approved account is required.');
    await db.query("INSERT INTO platform_api_keys(id,account_id,name,token_hash,scopes,expires_at) VALUES($1,$2,$3,$4,$5,now()+$6*interval '1 day')",[id,b.account_id,b.name.trim(),digest(token),JSON.stringify([...new Set(b.scopes)]),days]);
    await db.query("INSERT INTO audit_log(actor,action,entity_type,entity_id,meta) VALUES($1,'api_key_created','api_key',$2,$3)",[String(req.admin.id),id,{account_id:b.account_id,scopes:b.scopes}]);
   });return {id,token,message:'Copy this key now. It will not be shown again.'};

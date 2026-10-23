@@ -18,7 +18,7 @@ test('registration fixes role to user, hashes tokens and requires email verifica
   await f.controller.register({name:'New User',email:'new@example.test',password:'a-unique-long-password',role:'super_admin'});
   const a=(await f.db.query("SELECT * FROM platform_accounts WHERE email='new@example.test'")).rows[0];
   assert.equal(a.role,'user');assert.equal(a.email_verified,false);assert.equal(await passwordMatches('a-unique-long-password',a.password_hash),true);
-  const login=new AdminController(f.db);await assert.rejects(login.login({email:a.email,password:'a-unique-long-password'},{}),/credentials/);
+  const login=new AdminController(f.db);await assert.rejects(login.login({email:a.email,password:'a-unique-long-password'},{}),/verification|approval/);
   assert.equal(f.messages[0].purpose,'verify');
   const stored=(await f.db.query('SELECT token_hash FROM platform_account_tokens')).rows[0];assert.equal(stored.token_hash,digest(f.messages[0].token));assert.notEqual(stored.token_hash,f.messages[0].token);
   await f.controller.verify({token:f.messages[0].token});
@@ -57,12 +57,12 @@ test('tokens cannot be used for the wrong purpose',async()=>{
   await assert.rejects(f.controller.reset({token:f.messages[1].token,password:'a-new-long-password'}),/expired/);
  }finally{await f.sql.close();}
 });
-test('mail configuration and input validation gate public account flows',async()=>{
+test('signup remains available without mail while password recovery requires mail',async()=>{
  const f=await fixture();try{
   await assert.rejects(f.controller.register({name:'New',email:'invalid',password:'short'}));f.mail.configured=()=>false;
-  assert.equal(f.controller.options().registrationAvailable,false);
+  assert.equal(f.controller.options().registrationAvailable,true);assert.equal(f.controller.options().verificationMethod,'admin');
   await assert.rejects(f.controller.forgot({email:'admin@example.test'}),/unavailable/);
-  await assert.rejects(f.controller.register({name:'New',email:'new@example.test',password:'a-long-unique-password'}),/unavailable/);
+  await f.controller.register({name:'New',email:'new@example.test',password:'a-long-unique-password'});const account=(await f.db.query("SELECT * FROM platform_accounts WHERE email='new@example.test'")).rows[0];assert.equal(account.email_verified,false);assert.equal(account.admin_approved,false);assert.equal(account.role,'user');
  }finally{await f.sql.close();}
 });
 test('SMTP links use configured HTTPS origin, with TLS and no request-host input',async()=>{
@@ -76,4 +76,23 @@ test('SMTP links use configured HTTPS origin, with TLS and no request-host input
   assert.match(message.text,/https:\/\/justisolve.example.test\/#action=reset&token=/);
   process.env.PUBLIC_APP_URL='http://evil.example';assert.equal(mail.configured(),false);
  }finally{nodemailer.createTransport=original;for(const key of keys){if(old[key]===undefined)delete process.env[key];else process.env[key]=old[key];}}
+});
+
+test('pending account cannot sign in until explicit admin approval; approval does not claim email verification',async()=>{
+ const f=await fixture();try{
+  f.mail.configured=()=>false;await f.controller.register({name:'Pending User',email:' pending@example.test ',password:'a-long-unique-password',role:'super_admin'});
+  const a=(await f.db.query("SELECT * FROM platform_accounts WHERE email='pending@example.test'")).rows[0],admin=new AdminController(f.db);
+  await assert.rejects(admin.login({email:a.email,password:'a-long-unique-password'},{}),/verification|approval/);
+  await admin.approve(String(a.id),{admin:{id:1,email:'admin@example.test'}});
+  const approved=(await f.db.query('SELECT * FROM platform_accounts WHERE id=$1',[a.id])).rows[0];assert.equal(approved.admin_approved,true);assert.equal(approved.email_verified,false);assert.equal(approved.role,'user');
+  let signedIn=false;await admin.login({email:a.email,password:'a-long-unique-password'},{cookie(){signedIn=true;},setHeader(){}});assert.equal(signedIn,true);
+  assert.equal((await f.db.query("SELECT * FROM audit_log WHERE action='account_approved'")).rows.length,1);
+ }finally{await f.sql.close();}
+});
+test('repeat registration resends pending verification without replacing the original password',async()=>{
+ const f=await fixture();try{
+  const body={name:'Pending',email:'retry@example.test',password:'a-long-unique-password'};await f.controller.register(body);await f.db.query("UPDATE platform_account_tokens SET created_at=now()-interval '3 minutes'");
+  await f.controller.register({...body,password:'another-long-password'});assert.equal(f.messages.length,2);
+  const a=(await f.db.query("SELECT * FROM platform_accounts WHERE email='retry@example.test'")).rows[0];assert.equal(await passwordMatches(body.password,a.password_hash),true);assert.equal(await passwordMatches('another-long-password',a.password_hash),false);
+ }finally{await f.sql.close();}
 });

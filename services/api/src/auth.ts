@@ -21,7 +21,7 @@ export class AccessGuard implements CanActivate {
   const apiKey=req.headers['x-api-key'];
   if(apiKey!==undefined){
    if(typeof apiKey!=='string'||!/^js_[a-f0-9]{64}$/.test(apiKey))throw new UnauthorizedException('Invalid API key.');
-   const row=(await this.db.query('SELECT k.id key_id,k.scopes,a.id,a.email,a.name,a.role FROM platform_api_keys k JOIN platform_accounts a ON a.id=k.account_id WHERE k.token_hash=$1 AND k.revoked_at IS NULL AND k.expires_at>now() AND a.active=true AND a.email_verified=true',[digest(apiKey)])).rows[0];
+   const row=(await this.db.query('SELECT k.id key_id,k.scopes,a.id,a.email,a.name,a.role FROM platform_api_keys k JOIN platform_accounts a ON a.id=k.account_id WHERE k.token_hash=$1 AND k.revoked_at IS NULL AND k.expires_at>now() AND a.active=true AND (a.email_verified=true OR a.admin_approved=true)',[digest(apiKey)])).rows[0];
    if(!row)throw new UnauthorizedException('API key revoked, expired or invalid.');
    const scope=/^\/pacer\/(?:info|connect|disconnect|search)$/.test(route)?'pacer':/^\/marketplace(?:\/checkout|\/orders\/[a-f0-9-]{36}\/verify)?$/.test(route)?'wallet':null;
    if(!scope||!Array.isArray(row.scopes)||!row.scopes.includes(scope))throw new ForbiddenException('API key scope does not permit this endpoint.');
@@ -29,7 +29,7 @@ export class AccessGuard implements CanActivate {
   }
   const cookie=String(req.headers.cookie||'').split(';').map(x=>x.trim()).find(x=>x.startsWith('justisolve_session='));const token=cookie?.slice('justisolve_session='.length)||'';
   if(!/^[a-f0-9]{64}$/.test(token))throw new UnauthorizedException('Administrator sign-in required.');
-  const r=await this.db.query('SELECT a.id,a.email,a.name,a.role FROM platform_sessions s JOIN platform_accounts a ON a.id=s.account_id WHERE s.token_hash=$1 AND s.expires_at>now() AND a.active=true AND a.email_verified=true',[digest(token)]);
+  const r=await this.db.query('SELECT a.id,a.email,a.name,a.role FROM platform_sessions s JOIN platform_accounts a ON a.id=s.account_id WHERE s.token_hash=$1 AND s.expires_at>now() AND a.active=true AND (a.email_verified=true OR a.admin_approved=true)',[digest(token)]);
   if(!r.rows[0])throw new UnauthorizedException('Session expired. Sign in again.');
   if(r.rows[0].role!=='super_admin'&&!['/admin/auth/me','/admin/auth/logout','/intake','/ai/providers'].includes(route)&&!/^\/(?:marketplace(?:\/orders\/[a-f0-9-]{36}\/verify|\/checkout)?|pacer\/(?:info|connect|disconnect|search))$/.test(route)&&!/^\/intake\/\d+\/files\/\d+$/.test(route))throw new ForbiddenException('Super administrator access required.');req.admin=r.rows[0];return true;
  }

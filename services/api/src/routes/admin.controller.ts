@@ -19,14 +19,22 @@ export class AdminController {
  }
  @Post('auth/login') async login(@Body() b:any,@Res({passthrough:true}) res:any){
   if(typeof b.password!=='string'||b.password.length>200||typeof b.email!=='string')throw new UnauthorizedException('Invalid credentials.');
-  const a=(await this.db.query('SELECT * FROM platform_accounts WHERE email=$1 AND active=true AND email_verified=true',[b.email.toLowerCase().trim()])).rows[0];
-  const valid=await passwordMatches(b.password,a?.password_hash||'dummy:'+('00'.repeat(64)));if(!a||!valid)throw new UnauthorizedException('Invalid credentials.');
+  const a=(await this.db.query('SELECT * FROM platform_accounts WHERE email=$1 AND active=true',[b.email.toLowerCase().trim()])).rows[0];
+  const valid=await passwordMatches(b.password,a?.password_hash||'dummy:'+('00'.repeat(64)));if(!a||!valid)throw new UnauthorizedException('Invalid credentials.');if(!a.email_verified&&!a.admin_approved)throw new UnauthorizedException('Your account is pending email verification or administrator approval.');
   const token=randomBytes(32).toString('hex');await this.db.query("DELETE FROM platform_sessions WHERE expires_at<now()");await this.db.query("INSERT INTO platform_sessions(token_hash,account_id,expires_at) VALUES($1,$2,now()+interval '8 hours')",[digest(token),a.id]);
   res.cookie('justisolve_session',token,{httpOnly:true,secure:process.env.COOKIE_SECURE!=='false',sameSite:'strict',maxAge:8*3600000,path:'/api'});res.setHeader('Cache-Control','no-store');await this.audit(a.email,'login',a.id);return {id:a.id,email:a.email,name:a.name,role:a.role};
  }
  @Get('auth/me') me(@Req() req:any){return req.admin;}
  @Post('auth/logout') async logout(@Req() req:any,@Res({passthrough:true}) res:any){const token=String(req.headers.cookie||'').match(/(?:^|;\s*)justisolve_session=([a-f0-9]{64})/)?.[1];if(token)await this.db.query('DELETE FROM platform_sessions WHERE token_hash=$1',[digest(token)]);res.clearCookie('justisolve_session',{path:'/api',httpOnly:true,secure:process.env.COOKIE_SECURE!=='false',sameSite:'strict'});return {ok:true};}
- @Get('accounts') async accounts(){return (await this.db.query('SELECT id,email,name,role,active,created_at FROM platform_accounts ORDER BY id')).rows;}
+ @Get('accounts') async accounts(){return (await this.db.query('SELECT id,email,name,role,active,email_verified,admin_approved,created_at FROM platform_accounts ORDER BY id')).rows;}
+ @Post('accounts/:id/approve') async approve(@Param('id') id:string,@Req() req:any){
+  if(!/^\d+$/.test(id))throw new BadRequestException('Valid account ID required.');
+  const c=await this.db.pool.connect();try{
+   await c.query('BEGIN');const row=(await c.query("UPDATE platform_accounts SET admin_approved=true WHERE id=$1 AND role='user' AND active=true RETURNING id,email,name,role,active,email_verified,admin_approved",[id])).rows[0];
+   if(!row)throw new BadRequestException('Active user account not found.');
+   await c.query("INSERT INTO audit_log(actor,action,entity_type,entity_id,meta) VALUES($1,'account_approved','account',$2,$3)",[req.admin.email,String(id),{email_verified:row.email_verified}]);await c.query('COMMIT');return row;
+  }catch(e){await c.query('ROLLBACK');throw e;}finally{c.release();}
+ }
  @Post('accounts') async add(@Body() b:any,@Req() req:any){accountInput(b);if(!['user','super_admin'].includes(b.role))throw new BadRequestException('Valid role required.');try{const r=await this.db.query('INSERT INTO platform_accounts(email,name,password_hash,role) VALUES($1,$2,$3,$4) RETURNING id,email,name,role,active',[b.email.toLowerCase().trim(),b.name.trim(),await passwordHash(b.password),b.role]);await this.audit(req.admin.email,'account_created',r.rows[0].id);return r.rows[0];}catch(e){if(e.code==='23505')throw new ConflictException('Account exists.');throw e;}}
  @Patch('accounts/:id') async account(@Param('id') id:string,@Body() b:any,@Req() req:any){
   if(id===String(req.admin.id)&&b.active===false)throw new BadRequestException('You cannot disable your current account.');if(typeof b.active!=='boolean')throw new BadRequestException('Active state required.');
