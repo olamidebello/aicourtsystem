@@ -1,0 +1,59 @@
+---
+- name: Promote an existing JustiSolve account to super administrator
+  hosts: all
+  become: true
+  vars:
+    app_dir: /opt/aicourtsystem
+    compose_project: docker
+  tasks:
+    - name: Validate promotion request
+      ansible.builtin.assert:
+        that:
+          - app_dir is match('^/[A-Za-z0-9/_-]+$')
+          - compose_project is match('^[a-z0-9][a-z0-9_-]*$')
+          - promote_email is defined
+          - promote_email | default('') is match('^[^\s@]+@[^\s@]+\.[^\s@]+$')
+          - promote_email | default('') | length <= 254
+        fail_msg: 'Set promote_email to the exact existing account email and app_dir to the production checkout.'
+    - name: Detect Compose plugin
+      ansible.builtin.command: docker compose version
+      register: plugin
+      changed_when: false
+      failed_when: false
+    - name: Select Compose command
+      ansible.builtin.set_fact:
+        promotion_compose: "{{ 'docker compose' if plugin.rc == 0 else 'docker-compose' }}"
+    - name: Promote only the exact existing account and revoke its old sessions
+      ansible.builtin.command:
+        argv: "{{ promotion_compose.split() + ['-p', compose_project, '--env-file', '.env', '-f', 'docker/docker-compose.yml', 'exec', '-T', 'api', 'node', '-', promote_email | lower | trim] }}"
+        chdir: '{{ app_dir }}'
+        stdin: |
+          const {Pool}=require('pg');
+          const email=process.argv[2];
+          const pool=new Pool({connectionString:process.env.DATABASE_URL});
+          (async()=>{
+            const db=await pool.connect();
+            try{
+              await db.query('BEGIN');
+              await db.query('SELECT pg_advisory_xact_lock(736194)');
+              const found=await db.query('SELECT id,email,role,active,email_verified FROM platform_accounts WHERE lower(email)=$1 FOR UPDATE',[email]);
+              if(found.rows.length!==1)throw Error('Exactly one existing account must match the email. Register the account first if it is missing.');
+              const account=found.rows[0];
+              const changed=account.role!=='super_admin';
+              if(changed){
+                await db.query("UPDATE platform_accounts SET role='super_admin' WHERE id=$1",[account.id]);
+                await db.query('DELETE FROM platform_sessions WHERE account_id=$1',[account.id]);
+                await db.query("INSERT INTO audit_log(actor,action,entity_type,entity_id,meta) VALUES('server-admin','account_promoted','administration',$1,$2)",[String(account.id),{email:account.email,from_role:account.role,to_role:'super_admin'}]);
+              }
+              const verified=await db.query('SELECT email,role,active,email_verified FROM platform_accounts WHERE id=$1',[account.id]);
+              if(verified.rows[0].role!=='super_admin')throw Error('Promotion verification failed.');
+              await db.query('COMMIT');
+              console.log(JSON.stringify({changed,...verified.rows[0]}));
+            }catch(e){await db.query('ROLLBACK');console.error(e.message||'Promotion failed.');process.exitCode=1;}
+            finally{db.release();await pool.end();}
+          })().catch(()=>{console.error('Database connection failed.');process.exitCode=1;});
+      register: promotion
+      changed_when: "'\"changed\":true' in promotion.stdout"
+    - name: Report verified account role
+      ansible.builtin.debug:
+        msg: '{{ promotion.stdout | from_json }}'
