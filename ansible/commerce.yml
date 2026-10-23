@@ -1,0 +1,75 @@
+---
+- name: Deploy JustiSolve marketplace and PACER billing
+  hosts: all
+  become: true
+  vars:
+    app_dir: /opt/aicourtsystem
+    compose_project: docker
+  tasks:
+    - name: Validate checkout path and project
+      ansible.builtin.assert:
+        that:
+          - app_dir is match('^/[A-Za-z0-9/_-]+$')
+          - compose_project is match('^[a-z0-9][a-z0-9_-]*$')
+    - name: Preserve environment and generate encryption key only if absent
+      ansible.builtin.command:
+        argv: [python3, '-']
+        chdir: '{{ app_dir }}'
+        stdin: |
+          import os,re,secrets,tempfile
+          from pathlib import Path
+          p=Path('.env')
+          if not p.is_file(): raise SystemExit('Existing production .env required. Run the hosting deployment first.')
+          text=p.read_text()
+          lines=[line for line in text.splitlines() if re.match(r'^\s*COMMERCE_ENCRYPTION_KEY\s*=',line)]
+          if len(lines)>1: raise SystemExit('Duplicate encryption key entries; resolve without rotating the existing key.')
+          value=lines[0].split('=',1)[1].strip().strip('"\'') if lines else ''
+          if value and not re.fullmatch('[a-f0-9]{64}',value): raise SystemExit('Invalid existing encryption key; restore the correct value.')
+          if value:
+              os.chmod(p,0o600)
+              print('Existing key preserved.')
+          else:
+              line='COMMERCE_ENCRYPTION_KEY='+secrets.token_hex(32)
+              text=re.sub(r'^\s*COMMERCE_ENCRYPTION_KEY\s*=.*$',line,text,flags=re.M) if lines else text.rstrip()+'\n'+line+'\n'
+              fd,name=tempfile.mkstemp(prefix='.commerce-env-',dir='.')
+              try:
+                  os.fchmod(fd,0o600)
+                  with os.fdopen(fd,'w') as f:
+                      f.write(text); f.flush(); os.fsync(f.fileno())
+                  os.replace(name,p)
+              finally:
+                  if os.path.exists(name): os.unlink(name)
+              print('Encryption key configured.')
+      register: key_result
+      changed_when: "'configured' in key_result.stdout"
+      no_log: true
+    - name: Detect Compose plugin
+      ansible.builtin.command: docker compose version
+      register: plugin
+      changed_when: false
+      failed_when: false
+    - name: Select Compose command
+      ansible.builtin.set_fact:
+        commerce_compose: "{{ 'docker compose' if plugin.rc == 0 else 'docker-compose' }}"
+    - name: Build API and web without changing other hosted domains
+      ansible.builtin.command:
+        cmd: '{{ commerce_compose }} -p {{ compose_project }} --env-file .env -f docker/docker-compose.yml build api web'
+        chdir: '{{ app_dir }}'
+    - name: Deploy application preserving database volumes
+      ansible.builtin.command:
+        cmd: '{{ commerce_compose }} -p {{ compose_project }} --env-file .env -f docker/docker-compose.yml up -d --no-deps api web'
+        chdir: '{{ app_dir }}'
+    - name: Wait for API health and protected commerce endpoints
+      ansible.builtin.command:
+        cmd: >-
+          {{ commerce_compose }} -p {{ compose_project }} --env-file .env -f docker/docker-compose.yml exec -T api
+          node -e "Promise.all(['/health','/marketplace','/admin/commerce'].map(async p=>{const r=await fetch('http://127.0.0.1:4000/api'+p);if(r.status!==(p==='/health'?200:401))throw Error(p)})).catch(()=>process.exit(1))"
+        chdir: '{{ app_dir }}'
+      register: commerce_health
+      retries: 20
+      delay: 3
+      until: commerce_health.rc == 0
+      changed_when: false
+    - name: Report configuration destination
+      ansible.builtin.debug:
+        msg: 'Open Administration > commerce to configure gateways and PACER credentials, enable system PACER, and grant user access. Keys were not printed. Back up the production .env securely; the encryption key is required to recover saved credentials.'

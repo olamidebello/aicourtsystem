@@ -72,6 +72,7 @@ services:
   api:
     build: { context: ../services/api }
     environment:
+      COMMERCE_ENCRYPTION_KEY: "${COMMERCE_ENCRYPTION_KEY:-}"
       DATABASE_URL: "postgresql://${POSTGRES_USER:-aicourt}:${POSTGRES_PASSWORD:-aicourt}@postgres:5432/${POSTGRES_DB:-aicourt}"
       AI_BASE_URL: "http://ai:8000"
       ADMIN_SETUP_TOKEN: "${ADMIN_SETUP_TOKEN:-}"
