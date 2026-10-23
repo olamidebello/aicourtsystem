@@ -59,6 +59,8 @@ services:
   ai:
     build: { context: ../services/ai }
     environment:
+      AI_CONFIG_TOKEN: "${AI_CONFIG_TOKEN:-}"
+      API_CONFIG_URL: "http://api:4000/api/internal/ai/config"
       OLLAMA_BASE_URL: "http://ollama:11434"
       OLLAMA_MODEL: "${OLLAMA_MODEL:-llama3.2:3b}"
       OLLAMA_DRAFT_MODELS: "${OLLAMA_DRAFT_MODELS:-llama3.2:3b}"
@@ -72,6 +74,7 @@ services:
   api:
     build: { context: ../services/api }
     environment:
+      AI_CONFIG_TOKEN: "${AI_CONFIG_TOKEN:-}"
       COMMERCE_ENCRYPTION_KEY: "${COMMERCE_ENCRYPTION_KEY:-}"
       DATABASE_URL: "postgresql://${POSTGRES_USER:-aicourt}:${POSTGRES_PASSWORD:-aicourt}@postgres:5432/${POSTGRES_DB:-aicourt}"
       AI_BASE_URL: "http://ai:8000"

@@ -14,6 +14,7 @@ export class AccessGuard implements CanActivate {
   const req=context.switchToHttp().getRequest();const route=req.path.replace(/^\/api/,'').replace(/\/$/,'');
   if(['/health','/admin/auth/status','/admin/auth/bootstrap','/admin/auth/login','/admin/auth/options','/admin/auth/register','/admin/auth/forgot-password','/admin/auth/reset-password','/admin/auth/verify-email','/news','/policy/requests'].includes(route))return true;
   if(req.method==='GET'&&/^\/news\/\d+\/media\/(audio|video)$/.test(route))return true;
+  if(route==='/internal/ai/config'){if(!secretMatches(req.headers['x-ai-config-token']||'',process.env.AI_CONFIG_TOKEN||''))throw new UnauthorizedException();return true;}
   if(route==='/internal/news/tick'){
    if(!secretMatches(req.headers['x-worker-token']||'',process.env.NEWS_WORKER_TOKEN||''))throw new UnauthorizedException();return true;
   }

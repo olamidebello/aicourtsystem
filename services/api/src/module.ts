@@ -1,3 +1,4 @@
+import {AiProvisioningController} from './routes/ai-provisioning.controller';
 import {CommerceService} from './commerce.service';
 import {CommerceAdminController,MarketplaceController} from './routes/commerce.controller';
 import { AccountAccessController } from './routes/account-access.controller';
@@ -17,5 +18,5 @@ import { HealthController } from './routes/health.controller';
 import { DraftController } from './routes/draft.controller';
 import { EvidenceController } from './routes/evidence.controller';
 import { PlatformController } from './routes/platform.controller';
-@Module({providers:[CommerceService,AccountMailer,CourtAutomationService,DbService,NewsService,{provide:APP_GUARD,useClass:AccessGuard}],controllers:[CommerceAdminController,MarketplaceController,AccountAccessController,IntakeController,CourtAutomationController,AdminController,NewsController,PacerController,HealthController,DraftController,EvidenceController,PlatformController]})
+@Module({providers:[CommerceService,AccountMailer,CourtAutomationService,DbService,NewsService,{provide:APP_GUARD,useClass:AccessGuard}],controllers:[AiProvisioningController,CommerceAdminController,MarketplaceController,AccountAccessController,IntakeController,CourtAutomationController,AdminController,NewsController,PacerController,HealthController,DraftController,EvidenceController,PlatformController]})
 export class AppModule {}

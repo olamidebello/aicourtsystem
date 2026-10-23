@@ -43,6 +43,34 @@
       register: key_result
       changed_when: "'configured' in key_result.stdout"
       no_log: true
+    - name: Preserve or generate internal AI provisioning authorization
+      ansible.builtin.command:
+        argv: [python3, '-']
+        chdir: '{{ app_dir }}'
+        stdin: |
+          import os,re,secrets,tempfile
+          from pathlib import Path
+          p=Path('.env');text=p.read_text()
+          rows=[line for line in text.splitlines() if re.match(r'^\s*AI_CONFIG_TOKEN\s*=',line)]
+          if len(rows)>1: raise SystemExit('Duplicate AI_CONFIG_TOKEN entries; resolve before deploying.')
+          value=rows[0].split('=',1)[1].strip().strip('"\'') if rows else ''
+          if value and not re.fullmatch('[a-f0-9]{64}',value): raise SystemExit('Invalid AI_CONFIG_TOKEN; restore its original value.')
+          if value: print('Existing authorization preserved.')
+          else:
+              line='AI_CONFIG_TOKEN='+secrets.token_hex(32)
+              text=re.sub(r'^\s*AI_CONFIG_TOKEN\s*=.*$',line,text,flags=re.M) if rows else text.rstrip()+'\n'+line+'\n'
+              fd,name=tempfile.mkstemp(prefix='.ai-env-',dir='.')
+              try:
+                  os.fchmod(fd,0o600)
+                  with os.fdopen(fd,'w') as f:
+                      f.write(text);f.flush();os.fsync(f.fileno())
+                  os.replace(name,p)
+              finally:
+                  if os.path.exists(name):os.unlink(name)
+              print('Internal authorization configured.')
+      register: ai_token_result
+      changed_when: "'configured' in ai_token_result.stdout"
+      no_log: true
     - name: Detect Compose plugin
       ansible.builtin.command: docker compose version
       register: plugin
@@ -53,11 +81,11 @@
         commerce_compose: "{{ 'docker compose' if plugin.rc == 0 else 'docker-compose' }}"
     - name: Build API and web without changing other hosted domains
       ansible.builtin.command:
-        cmd: '{{ commerce_compose }} -p {{ compose_project }} --env-file .env -f docker/docker-compose.yml build api web'
+        cmd: '{{ commerce_compose }} -p {{ compose_project }} --env-file .env -f docker/docker-compose.yml build api web ai'
         chdir: '{{ app_dir }}'
     - name: Deploy application preserving database volumes
       ansible.builtin.command:
-        cmd: '{{ commerce_compose }} -p {{ compose_project }} --env-file .env -f docker/docker-compose.yml up -d --no-deps api web'
+        cmd: '{{ commerce_compose }} -p {{ compose_project }} --env-file .env -f docker/docker-compose.yml up -d --no-deps api web ai'
         chdir: '{{ app_dir }}'
     - name: Wait for API health and protected commerce endpoints
       ansible.builtin.command:

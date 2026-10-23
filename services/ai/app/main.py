@@ -23,10 +23,10 @@ class CompareReq(BaseModel):
     task:str="compare"
 
 async def chat(prompt:str):
-    async with httpx.AsyncClient(timeout=180) as c:
-        r=await c.post(f"{OLLAMA}/api/chat",json={"model":MODEL,"messages":[{"role":"system","content":SYSTEM},{"role":"user","content":prompt}],"stream":False,"options":{"temperature":0.15}})
-        r.raise_for_status()
-        return r.json()["message"]["content"]
+    from .ensemble import providers, generate
+    local=[p for p,cfg in providers().items() if cfg['enabled'] and not cfg['external']]
+    if not local:raise HTTPException(503,'Enable a local AI model in Super Admin AI provisioning. Hosted providers require a provider-selection workflow with external-processing consent.')
+    return await generate(local[0],prompt,system=SYSTEM)
 
 @app.get("/health")
 def health(): return {"ok":True,"model":MODEL}
@@ -58,3 +58,6 @@ app.include_router(media_router)
 
 from .intake import router as intake_router
 app.include_router(intake_router)
+
+from .provisioning import router as provisioning_router
+app.include_router(provisioning_router)
