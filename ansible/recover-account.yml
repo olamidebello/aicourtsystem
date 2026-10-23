@@ -1,0 +1,71 @@
+---
+- name: Install current account recovery fixes before issuing a link
+  ansible.builtin.import_playbook: pull-and-install.yml
+
+- name: Issue a private single-use password reset link on the server
+  hosts: all
+  become: true
+  vars:
+    app_dir: /opt/aicourtsystem
+    compose_project: docker
+  tasks:
+    - name: Require the exact account email
+      ansible.builtin.assert:
+        that:
+          - reset_email is defined
+          - reset_email | default('') is match('^[^\s@]+@[^\s@]+\.[^\s@]+$')
+          - reset_email | default('') | length <= 254
+        fail_msg: 'Pass reset_email with the exact existing account email.'
+    - name: Detect Compose plugin
+      ansible.builtin.command: docker compose version
+      register: recovery_plugin
+      changed_when: false
+      failed_when: false
+    - name: Select Compose command
+      ansible.builtin.set_fact:
+        recovery_compose: "{{ 'docker compose' if recovery_plugin.rc == 0 else 'docker-compose' }}"
+    - name: Issue reset token without changing password, role, or approval
+      ansible.builtin.command:
+        argv: "{{ recovery_compose.split() + ['-p',compose_project,'--env-file','.env','-f','docker/docker-compose.yml','exec','-T','api','node','-',reset_email | lower | trim] }}"
+        chdir: '{{ app_dir }}'
+        stdin: |
+          const {Pool}=require('pg');
+          const {randomBytes,createHash}=require('crypto');
+          const pool=new Pool({connectionString:process.env.DATABASE_URL});
+          (async()=>{
+            const origin=new URL(process.env.PUBLIC_APP_URL||'https://justisolve.com');
+            if(origin.protocol!=='https:'||origin.username||origin.password)throw Error('Valid HTTPS PUBLIC_APP_URL required.');
+            const db=await pool.connect();
+            try{
+              await db.query('BEGIN');
+              const found=await db.query('SELECT id,email FROM platform_accounts WHERE lower(email)=$1 AND active=true FOR UPDATE',[process.argv[2]]);
+              if(found.rows.length!==1)throw Error('Exactly one active account must match the email.');
+              const account=found.rows[0],token=randomBytes(32).toString('hex');
+              await db.query('DELETE FROM platform_account_tokens WHERE account_id=$1',[account.id]);
+              const expires=(await db.query("INSERT INTO platform_account_tokens(token_hash,account_id,purpose,expires_at) VALUES($1,$2,'reset',now()+interval '30 minutes') RETURNING expires_at",[createHash('sha256').update(token).digest('hex'),account.id])).rows[0].expires_at;
+              await db.query("INSERT INTO audit_log(actor,action,entity_type,entity_id) VALUES('server-admin','admin_reset_link_issued','account',$1)",[String(account.id)]);
+              await db.query('COMMIT');
+              console.log(JSON.stringify({email:account.email,expires_at:expires,reset_url:origin.origin+'/#'+new URLSearchParams({action:'reset',token}).toString()}));
+            }catch(e){await db.query('ROLLBACK');console.error(e.message||'Reset link could not be issued.');process.exitCode=1;}
+            finally{db.release();await pool.end();}
+          })().catch(()=>{console.error('Recovery configuration or database connection failed.');process.exitCode=1;});
+      register: recovery_link
+      no_log: true
+    - name: Create private recovery directory
+      ansible.builtin.file:
+        path: /etc/justisolve/recovery
+        state: directory
+        owner: root
+        group: root
+        mode: '0700'
+    - name: Save link privately instead of displaying it in deployment logs
+      ansible.builtin.copy:
+        dest: /etc/justisolve/recovery/password-reset.json
+        content: '{{ recovery_link.stdout }}'
+        owner: root
+        group: root
+        mode: '0600'
+      no_log: true
+    - name: Explain the remaining account-owner step
+      ansible.builtin.debug:
+        msg: 'The single-use link is saved in /etc/justisolve/recovery/password-reset.json (root only). Open reset_url within 30 minutes to choose a new password. No password or account approval was changed by this playbook.'

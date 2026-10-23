@@ -4,7 +4,7 @@ import { DbService } from '../db.service';
 import { AccountMailer } from '../account-mailer';
 import { digest, passwordHash } from '../auth';
 const registrationMessage={message:'Registration request received. If a new account was created, verify your email before signing in. If no verification email arrives, ask the site administrator to approve your account. Existing users can sign in or request password recovery.'};
-const generic={message:'If the account is eligible, an email will arrive shortly. Check your inbox and spam folder.'};
+const generic={message:'If the account is eligible and email delivery succeeds, a recovery email will arrive. Check your inbox and spam folder. If it does not arrive, ask the administrator for a secure reset link.'};
 function emailInput(value:any){if(typeof value!=='string')throw new BadRequestException('Enter a valid email address.');const email=value.trim().toLowerCase();if(email.length>254||!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)||/[\r\n]/.test(value))throw new BadRequestException('Enter a valid email address.');return email;}
 
 function passwordInput(value:any){if(typeof value!=='string'||value.length<14||value.length>200)throw new BadRequestException('Use a password of 14–200 characters.');}
@@ -62,8 +62,9 @@ export class AccountAccessController {
    const used=await c.query('DELETE FROM platform_account_tokens WHERE token_hash=$1 AND purpose=$2 AND expires_at>now() RETURNING account_id',[digest(token),purpose]);
    if(!used.rows.length)throw new BadRequestException('Invalid or expired link. Request a new email.');
    if(purpose==='reset'){
-    await c.query('UPDATE platform_accounts SET password_hash=$2 WHERE id=$1 AND email_verified=true',[a.id,password]);
+    const updated=await c.query('UPDATE platform_accounts SET password_hash=$2 WHERE id=$1 AND active=true RETURNING id',[a.id,password]);if(!updated.rows.length)throw new BadRequestException('Account is unavailable.');
     await c.query('DELETE FROM platform_sessions WHERE account_id=$1',[a.id]);
+    if((await c.query("SELECT to_regclass('public.platform_api_keys') IS NOT NULL available")).rows[0].available)await c.query('UPDATE platform_api_keys SET revoked_at=coalesce(revoked_at,now()) WHERE account_id=$1',[a.id]);
    }else await c.query('UPDATE platform_accounts SET email_verified=true WHERE id=$1',[a.id]);
    await c.query('DELETE FROM platform_account_tokens WHERE account_id=$1',[a.id]);
    await c.query("INSERT INTO audit_log(actor,action,entity_type,entity_id) VALUES('account-recovery',$1,'account',$2)",[purpose==='reset'?'password_reset':'email_verified',String(a.id)]);

@@ -71,3 +71,17 @@ Existing saved `openai` and `claude` references remain supported and resolve to 
 Create account remains available when public registration is enabled, including when SMTP is not configured. New accounts are always ordinary users and remain pending until email verification or explicit administrator approval; signup never grants immediate access or a super-admin role. With email configured, verification is sent normally. Repeating signup can resend a pending verification after the mail cooldown without overwriting the original account password. Password recovery still requires configured email.
 
 When email is unavailable or no verification arrives, open **Administration > accounts** and choose **Approve account** for the intended pending user. Approval is audited and recorded separately from email verification; it does not falsely mark an email as verified or promote the account. Disabled accounts must be enabled before approval. A user entering the correct password for a pending account gets an explicit verification/approval message; wrong passwords still get the generic credentials error. Existing users, tokens and passwords are preserved by the additive schema migration. Public signup still requires initial admin setup and respects `ALLOW_REGISTRATION=false`.
+
+## Password recovery without SMTP
+
+Public **Forgot password?** opens recovery guidance even when email is unavailable. Email recovery remains dependent on SMTP; the site does not claim a recovery email was sent. If email is missing or delivery fails, an authenticated super admin can open **Administration > accounts > Generate password-reset link** for the exact account. The one-time link is displayed only in the admin panel, expires after 30 minutes, and should be shared privately with the account owner. Issuing a replacement invalidates older recovery/verification links. The owner opens it and chooses their own password; SMTP is not needed to consume the link.
+
+A root operator can deploy the fix and issue a link without signing into the application:
+
+```bash
+ansible-pull -U https://github.com/olamidebello/justisolve.git -C main -d /opt/justisolve-bootstrap -i localhost, -c local ansible/recover-account.yml -e reset_email=dobtablewater@gmail.com
+```
+
+This playbook saves the recovery result to `/etc/justisolve/recovery/password-reset.json`, readable only by root; it does not print the token into Ansible logs. Read `reset_url` privately and open it within 30 minutes. The command requires the existing installation and running Docker, with `app_dir` and `compose_project` overrides as described above. It only issues the link: no password is changed until the owner submits the reset form. Links are stored as hashes in the database and issuance is audited without the token. Account approval, email verification, role and enabled state are preserved.
+
+The reset handler now actually updates passwords for active admin-approved accounts whose email remains unverified, rather than reporting success after a no-op update. A completed reset invalidates existing sessions and JustiSolve API keys. Pending accounts remain pending after a password reset; disabled accounts cannot reset. Existing expiry, single-use and token-purpose checks still apply.

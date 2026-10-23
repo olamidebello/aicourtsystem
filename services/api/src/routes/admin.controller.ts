@@ -27,6 +27,17 @@ export class AdminController {
  @Get('auth/me') me(@Req() req:any){return req.admin;}
  @Post('auth/logout') async logout(@Req() req:any,@Res({passthrough:true}) res:any){const token=String(req.headers.cookie||'').match(/(?:^|;\s*)justisolve_session=([a-f0-9]{64})/)?.[1];if(token)await this.db.query('DELETE FROM platform_sessions WHERE token_hash=$1',[digest(token)]);res.clearCookie('justisolve_session',{path:'/api',httpOnly:true,secure:process.env.COOKIE_SECURE!=='false',sameSite:'strict'});return {ok:true};}
  @Get('accounts') async accounts(){return (await this.db.query('SELECT id,email,name,role,active,email_verified,admin_approved,created_at FROM platform_accounts ORDER BY id')).rows;}
+ @Post('accounts/:id/reset-link') async resetLink(@Param('id') id:string,@Req() req:any,@Res({passthrough:true}) res:any){
+  if(!/^\d+$/.test(id))throw new BadRequestException('Valid account ID required.');
+  const origin=new URL(process.env.PUBLIC_APP_URL||'https://justisolve.com');if(origin.protocol!=='https:'||origin.username||origin.password)throw new BadRequestException('Configure a valid HTTPS public application URL.');
+  const token=randomBytes(32).toString('hex'),c=await this.db.pool.connect();
+  try{await c.query('BEGIN');const account=(await c.query('SELECT id,email FROM platform_accounts WHERE id=$1 AND active=true FOR UPDATE',[id])).rows[0];if(!account)throw new BadRequestException('Active account not found.');
+   await c.query('DELETE FROM platform_account_tokens WHERE account_id=$1',[id]);
+   await c.query("INSERT INTO platform_account_tokens(token_hash,account_id,purpose,expires_at) VALUES($1,$2,'reset',now()+interval '30 minutes')",[digest(token),id]);
+   await c.query("INSERT INTO audit_log(actor,action,entity_type,entity_id) VALUES($1,'admin_reset_link_issued','account',$2)",[req.admin.email,String(id)]);await c.query('COMMIT');res.setHeader('Cache-Control','no-store');
+   return {email:account.email,reset_url:origin.origin+'/#'+new URLSearchParams({action:'reset',token}).toString(),expires_in_minutes:30};
+  }catch(e){await c.query('ROLLBACK');throw e;}finally{c.release();}
+ }
  @Post('accounts/:id/approve') async approve(@Param('id') id:string,@Req() req:any){
   if(!/^\d+$/.test(id))throw new BadRequestException('Valid account ID required.');
   const c=await this.db.pool.connect();try{
