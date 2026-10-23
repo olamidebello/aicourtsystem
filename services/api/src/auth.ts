@@ -17,6 +17,15 @@ export class AccessGuard implements CanActivate {
   if(route==='/internal/news/tick'){
    if(!secretMatches(req.headers['x-worker-token']||'',process.env.NEWS_WORKER_TOKEN||''))throw new UnauthorizedException();return true;
   }
+  const apiKey=req.headers['x-api-key'];
+  if(apiKey!==undefined){
+   if(typeof apiKey!=='string'||!/^js_[a-f0-9]{64}$/.test(apiKey))throw new UnauthorizedException('Invalid API key.');
+   const row=(await this.db.query('SELECT k.id key_id,k.scopes,a.id,a.email,a.name,a.role FROM platform_api_keys k JOIN platform_accounts a ON a.id=k.account_id WHERE k.token_hash=$1 AND k.revoked_at IS NULL AND k.expires_at>now() AND a.active=true AND a.email_verified=true',[digest(apiKey)])).rows[0];
+   if(!row)throw new UnauthorizedException('API key revoked, expired or invalid.');
+   const scope=/^\/pacer\/(?:info|connect|disconnect|search)$/.test(route)?'pacer':/^\/marketplace(?:\/checkout|\/orders\/[a-f0-9-]{36}\/verify)?$/.test(route)?'wallet':null;
+   if(!scope||!Array.isArray(row.scopes)||!row.scopes.includes(scope))throw new ForbiddenException('API key scope does not permit this endpoint.');
+   await this.db.query('UPDATE platform_api_keys SET last_used_at=now() WHERE id=$1',[row.key_id]);req.admin={id:row.id,email:row.email,name:row.name,role:row.role};return true;
+  }
   const cookie=String(req.headers.cookie||'').split(';').map(x=>x.trim()).find(x=>x.startsWith('justisolve_session='));const token=cookie?.slice('justisolve_session='.length)||'';
   if(!/^[a-f0-9]{64}$/.test(token))throw new UnauthorizedException('Administrator sign-in required.');
   const r=await this.db.query('SELECT a.id,a.email,a.name,a.role FROM platform_sessions s JOIN platform_accounts a ON a.id=s.account_id WHERE s.token_hash=$1 AND s.expires_at>now() AND a.active=true AND a.email_verified=true',[digest(token)]);

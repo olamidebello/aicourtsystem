@@ -8,4 +8,13 @@ CREATE TABLE IF NOT EXISTS pacer_usage (id UUID PRIMARY KEY,account_id BIGINT NO
 INSERT INTO platform_settings(key,value) VALUES ('commerce','{"stripe_enabled":false,"paypal_enabled":false,"paypal_sandbox":true,"pacer_enabled":false,"search_reserve_cents":500,"markup_percent":30}') ON CONFLICT DO NOTHING;
 INSERT INTO commerce_products(name,description,price_cents,credit_cents,active)
 SELECT 'PACER wallet $10','Prepaid wallet credits for system PACER searches.',1000,1000,true WHERE NOT EXISTS(SELECT 1 FROM commerce_products);
+CREATE TABLE IF NOT EXISTS commerce_adjustments (
+ id UUID PRIMARY KEY,account_id BIGINT NOT NULL REFERENCES platform_accounts(id),actor_id BIGINT NOT NULL REFERENCES platform_accounts(id),
+ amount_cents INT NOT NULL CHECK(amount_cents>0),reason TEXT NOT NULL,created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE TABLE IF NOT EXISTS platform_api_keys (
+ id UUID PRIMARY KEY,account_id BIGINT NOT NULL REFERENCES platform_accounts(id),name TEXT NOT NULL,
+ token_hash TEXT UNIQUE NOT NULL,scopes JSONB NOT NULL,expires_at TIMESTAMPTZ NOT NULL,revoked_at TIMESTAMPTZ,
+ created_at TIMESTAMPTZ NOT NULL DEFAULT now(),last_used_at TIMESTAMPTZ
+);
 `;
