@@ -1,4 +1,5 @@
 'use client';
+import Marketplace from './marketplace';
 import Intake from './intake';
 import Admin from './admin';
 import AuthGate from './auth-gate';
@@ -8,7 +9,7 @@ import Pacer from './pacer';
 import {useEffect,useMemo,useState} from 'react';
 
 const modules=[
- ['dashboard','Dashboard'],['intake','Case Intake'],['news','News'],['pacer','PACER Records'],['cases','Cases'],['dockets','Dockets'],['documents','Documents'],['evidence','Evidence'],
+ ['marketplace','Marketplace & Wallet'],['dashboard','Dashboard'],['intake','Case Intake'],['news','News'],['pacer','PACER Records'],['cases','Cases'],['dockets','Dockets'],['documents','Documents'],['evidence','Evidence'],
  ['transcripts','Transcripts'],['research','Legal Research'],['draft','AI Drafting'],['ensemble','Multi-model Motions'],['analyze','AI Analysis'],
  ['tasks','Tasks'],['deadlines','Deadlines'],['alerts','Alerts'],['audit','Audit & Compliance'],['admin','Administration']
 ];
@@ -44,6 +45,7 @@ function Workspace(){
    {busy&&<div className="notice">Working…</div>}
    {tab==='intake'&&<Intake/>}
    {tab==='news'&&<NewsFeed/>}
+   {tab==='marketplace'&&<Marketplace api={API}/>}
    {tab==='pacer'&&<Pacer api={API}/>}
    {tab==='ensemble'&&<Ensemble api={API}/>}
    {tab==='dashboard'&&<section className="cards">{['cases','documents','evidence','tasks','deadlines','alerts'].map(k=><article key={k}><small>{k.toUpperCase()}</small><strong>{data?.[k]??'—'}</strong><span>Current workspace</span></article>)}</section>}

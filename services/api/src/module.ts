@@ -1,3 +1,5 @@
+import {CommerceService} from './commerce.service';
+import {CommerceAdminController,MarketplaceController} from './routes/commerce.controller';
 import { AccountAccessController } from './routes/account-access.controller';
 import { AccountMailer } from './account-mailer';
 import { IntakeController } from './routes/intake.controller';
@@ -15,5 +17,5 @@ import { HealthController } from './routes/health.controller';
 import { DraftController } from './routes/draft.controller';
 import { EvidenceController } from './routes/evidence.controller';
 import { PlatformController } from './routes/platform.controller';
-@Module({providers:[AccountMailer,CourtAutomationService,DbService,NewsService,{provide:APP_GUARD,useClass:AccessGuard}],controllers:[AccountAccessController,IntakeController,CourtAutomationController,AdminController,NewsController,PacerController,HealthController,DraftController,EvidenceController,PlatformController]})
+@Module({providers:[CommerceService,AccountMailer,CourtAutomationService,DbService,NewsService,{provide:APP_GUARD,useClass:AccessGuard}],controllers:[CommerceAdminController,MarketplaceController,AccountAccessController,IntakeController,CourtAutomationController,AdminController,NewsController,PacerController,HealthController,DraftController,EvidenceController,PlatformController]})
 export class AppModule {}

@@ -21,6 +21,6 @@ export class AccessGuard implements CanActivate {
   if(!/^[a-f0-9]{64}$/.test(token))throw new UnauthorizedException('Administrator sign-in required.');
   const r=await this.db.query('SELECT a.id,a.email,a.name,a.role FROM platform_sessions s JOIN platform_accounts a ON a.id=s.account_id WHERE s.token_hash=$1 AND s.expires_at>now() AND a.active=true AND a.email_verified=true',[digest(token)]);
   if(!r.rows[0])throw new UnauthorizedException('Session expired. Sign in again.');
-  if(r.rows[0].role!=='super_admin'&&!['/admin/auth/me','/admin/auth/logout','/intake','/ai/providers'].includes(route)&&!/^\/intake\/\d+\/files\/\d+$/.test(route))throw new ForbiddenException('Super administrator access required.');req.admin=r.rows[0];return true;
+  if(r.rows[0].role!=='super_admin'&&!['/admin/auth/me','/admin/auth/logout','/intake','/ai/providers'].includes(route)&&!/^\/(?:marketplace(?:\/orders\/[a-f0-9-]{36}\/verify|\/checkout)?|pacer\/(?:info|connect|disconnect|search))$/.test(route)&&!/^\/intake\/\d+\/files\/\d+$/.test(route))throw new ForbiddenException('Super administrator access required.');req.admin=r.rows[0];return true;
  }
 }

@@ -64,11 +64,19 @@ test('ordinary user cannot mount the administrator dashboard',async()=>{
   if(path==='/api/admin/auth/status')return response({setupRequired:false});
   if(path==='/api/ai/providers')return response([]);
   if(path==='/api/intake')return response([]);
+  if(path==='/api/marketplace')return response({gateways:[],products:[],orders:[],usage:[],balance_cents:0,search_reserve_cents:500,access:{enabled:true},pacer_enabled:true});
   return response({});
  };
  try{
   await act(async()=>{tree=create(React.createElement(Home));await flush();});
   assert.equal(requests.includes('/api/dashboard'),false);
+  assert.match(JSON.stringify(tree.toJSON()),/My own PACER account/);
+  assert.match(JSON.stringify(tree.toJSON()),/System PACER account/);
+  const connect=tree.root.findAllByType('button').find(b=>b.children.includes('Connect to PACER'));
+  assert.equal(connect.props.disabled,true);
+  const account=tree.root.findAllByType('select').find(s=>s.props.value==='system');
+  act(()=>account.props.onChange({target:{value:'personal'}}));
+  assert.match(JSON.stringify(tree.toJSON()),/billed directly by PACER/);
  }finally{if(tree)act(()=>tree.unmount());global.fetch=originalFetch;}
 });
 
