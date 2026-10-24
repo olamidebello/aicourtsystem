@@ -1,3 +1,4 @@
+import {platformFeatures} from './feature-controls';
 import { Injectable } from '@nestjs/common';
 import { DbService } from './db.service';
 import axios from 'axios';
@@ -6,6 +7,7 @@ import { digest } from './auth';
 export class CourtAutomationService {
  constructor(private db:DbService){}
  async tick(){
+  const features=await platformFeatures(this.db);if(features.automation===false||features.ai===false||features.cases===false)return {paused:true};
   const c=await this.db.pool.connect();let locked=false;
   try{
    locked=(await c.query('SELECT pg_try_advisory_lock(736195) locked')).rows[0].locked;if(!locked)return {status:'busy'};

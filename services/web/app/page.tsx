@@ -1,5 +1,5 @@
 'use client';
-import Justice from './justice';
+import TenantHub from './tenant-hub';
 import Marketplace from './marketplace';
 import Intake from './intake';
 import Admin from './admin';
@@ -39,7 +39,7 @@ function Workspace(){
  return <div className="shell">
   <aside><div className="brand"><img className="brandLogo" src="/justisolve-logo.png" alt="JustiSolve — Intelligent Solutions. Fairer Justice." width={1536} height={1024}/><span className="brandSlogan">Intelligent Solutions. Fairer Justice.</span></div>
    <nav>{modules.map(([id,label])=><button key={id} className={tab===id?'active':''} onClick={()=>setTab(id)}>{label}</button>)}</nav>
-   <div className="asideFoot"><span>Service status unverified</span><small>Development workspace</small></div>
+   <div className="asideFoot"><span>Private workspace</span><small>Access follows assigned permissions</small></div>
   </aside>
   <main>
    <header><div><h1>{modules.find(x=>x[0]===tab)?.[1]||'Search Results'}</h1><p>Cases, records, evidence, research, deadlines and AI in one workspace.</p></div>
@@ -47,7 +47,7 @@ function Workspace(){
    </header>
    {error&&<div className="panel error" role="alert">{error}</div>}
    {busy&&<div className="notice">Working…</div>}
-   {tab==='justice'&&<Justice admin/>}
+   {tab==='justice'&&<TenantHub admin/>}
    {tab==='intake'&&<Intake/>}
    {tab==='news'&&<NewsFeed/>}
    {tab==='marketplace'&&<Marketplace api={API}/>}

@@ -1,3 +1,4 @@
+import {licenseProfession} from './license-policy';
 const groups = [
  {
   "id": "judiciary",
@@ -272,7 +273,7 @@ const groups = [
  }
 ];
 export const JUSTICE_ROLES = groups.flatMap(g=>g.roles.map((label,i)=>({
- id:g.id+'_'+(i+1),label,group:g.id,category:g.label,duties:g.duties,
+ id:g.id+'_'+(i+1),license_profession:licenseProfession(g.id+'_'+(i+1)),label,group:g.id,category:g.label,duties:g.duties,
  workflow:['Confirm jurisdiction and assigned scope','Review authorized source records',
  'Prepare '+label.toLowerCase()+' work product','Submit for human review','Record completion and follow-up']
 })));

@@ -29,7 +29,7 @@
             const catalog=await r.json();if(catalog.length<160||new Set(catalog.map(r=>r.group)).size!==14)throw Error('Incomplete role catalog');
             for(const route of ['/profile','/matters','/reviews','/matters/1/proceedings'])if((await fetch(origin+route)).status!==401)throw Error('Authentication boundary failed');
             const db=new Pool({connectionString:process.env.DATABASE_URL});
-            try{for(const table of ['justice_roles','justice_matters','justice_members','justice_work','justice_proceedings'])if(!(await db.query('SELECT to_regclass($1) ready',[table])).rows[0].ready)throw Error('Missing schema');}finally{await db.end();}
+            try{for(const table of ['justice_roles','justice_matters','justice_members','justice_work','justice_proceedings','justice_orgs','justice_org_members','justice_org_invites','justice_files','justice_license_checks','communication_deliveries','phone_accounts'])if(!(await db.query('SELECT to_regclass($1) ready',[table])).rows[0].ready)throw Error('Missing schema');}finally{await db.end();}
             console.log('Role catalog, case protection and proceedings schema verified. No AI calls made.');
           })().catch(()=>{console.error('Judicial platform verification failed.');process.exitCode=1;});
       register: justice_check
@@ -40,3 +40,9 @@
     - name: Report next setup steps
       ansible.builtin.debug:
         msg: 'Open Judicial Roles & Workspaces, review role requests, create a private case, and assign approved members. Configure AI models under AI Provisioning. Trials, hearings and appeals are supervised simulations; no official filings or enforceable orders are automated.'
+
+- name: Enable bounded automatic professional credential rechecks
+  ansible.builtin.import_playbook: license-refresh.yml
+
+- name: Enable automatic signup phone account provisioning
+  ansible.builtin.import_playbook: phone-refresh.yml

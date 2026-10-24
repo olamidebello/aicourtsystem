@@ -1,3 +1,4 @@
+import {platformFeatures} from './feature-controls';
 import { Injectable } from '@nestjs/common';
 import axios from 'axios';
 import { Client } from 'minio';
@@ -7,6 +8,7 @@ export class NewsService {
  constructor(private db:DbService){}
  private storage(){return new Client({endPoint:process.env.MINIO_ENDPOINT||'minio',port:Number(process.env.MINIO_PORT||9000),useSSL:process.env.MINIO_USE_SSL==='true',accessKey:process.env.MINIO_ACCESS_KEY||'',secretKey:process.env.MINIO_SECRET_KEY||''});}
  async render(id:string){
+  const features=await platformFeatures(this.db);if(features.news===false||features.ai===false)throw new Error('News AI generation is disabled.');
   const post=(await this.db.query('SELECT * FROM news_posts WHERE id=$1',[id])).rows[0];if(!post?.body||!post.narration)return {status:'unavailable'};
   const claim=await this.db.query("UPDATE news_posts SET media_status='rendering',updated_at=now() WHERE id=$1 AND media_status<>'rendering' RETURNING id",[id]);if(!claim.rows.length)return {status:'busy'};
   try{const d=(await axios.post((process.env.AI_BASE_URL||'http://ai:8000')+'/news/media',{title:post.title,narration:post.narration},{timeout:560000,maxContentLength:45000000})).data;
@@ -20,6 +22,7 @@ export class NewsService {
   const row=(await this.db.query("SELECT audio_key,video_key FROM news_posts WHERE id=$1 AND status='published' AND media_status='ready'",[id])).rows[0];const key=kind==='audio'?row?.audio_key:row?.video_key;if(!key)return null;return this.storage().getObject(process.env.MINIO_BUCKET_EVIDENCE||'evidence',key);
  }
  async tick(campaignId?:string){
+  const features=await platformFeatures(this.db);if(features.news===false||features.ai===false)return {paused:true};
   const client=await this.db.pool.connect();let locked=false;
   try{
    locked=(await client.query('SELECT pg_try_advisory_lock(736193) locked')).rows[0].locked;if(!locked)return {status:'busy'};

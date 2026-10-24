@@ -1,3 +1,4 @@
+import {enforceFeature} from './feature-controls';
 import { Injectable, CanActivate, ExecutionContext, UnauthorizedException, ForbiddenException } from '@nestjs/common';
 import { DbService } from './db.service';
 import { createHash, scrypt as scryptCallback, randomBytes, timingSafeEqual } from 'crypto';
@@ -12,6 +13,7 @@ export class AccessGuard implements CanActivate {
  constructor(private db:DbService){}
  async canActivate(context:ExecutionContext){
   const req=context.switchToHttp().getRequest();const route=req.path.replace(/^\/api/,'').replace(/\/$/,'');
+  if(['/admin/auth/register','/news'].includes(route)||req.method==='GET'&&/^\/news\/\d+\/media\/(audio|video)$/.test(route))await enforceFeature(this.db,route);
   if(['/health','/justice/catalog','/admin/auth/status','/admin/auth/bootstrap','/admin/auth/login','/admin/auth/options','/admin/auth/register','/admin/auth/forgot-password','/admin/auth/reset-password','/admin/auth/verify-email','/news','/policy/requests'].includes(route))return true;
   if(req.method==='GET'&&/^\/news\/\d+\/media\/(audio|video)$/.test(route))return true;
   if(route==='/internal/ai/config'){if(!secretMatches(req.headers['x-ai-config-token']||'',process.env.AI_CONFIG_TOKEN||''))throw new UnauthorizedException();return true;}
@@ -25,12 +27,12 @@ export class AccessGuard implements CanActivate {
    if(!row)throw new UnauthorizedException('API key revoked, expired or invalid.');
    const scope=/^\/pacer\/(?:info|connect|disconnect|search)$/.test(route)?'pacer':/^\/marketplace(?:\/checkout|\/orders\/[a-f0-9-]{36}\/verify)?$/.test(route)?'wallet':null;
    if(!scope||!Array.isArray(row.scopes)||!row.scopes.includes(scope))throw new ForbiddenException('API key scope does not permit this endpoint.');
-   await this.db.query('UPDATE platform_api_keys SET last_used_at=now() WHERE id=$1',[row.key_id]);req.admin={id:row.id,email:row.email,name:row.name,role:row.role};return true;
+   await this.db.query('UPDATE platform_api_keys SET last_used_at=now() WHERE id=$1',[row.key_id]);req.admin={id:row.id,email:row.email,name:row.name,role:row.role};await enforceFeature(this.db,route);return true;
   }
   const cookie=String(req.headers.cookie||'').split(';').map(x=>x.trim()).find(x=>x.startsWith('justisolve_session='));const token=cookie?.slice('justisolve_session='.length)||'';
   if(!/^[a-f0-9]{64}$/.test(token))throw new UnauthorizedException('Administrator sign-in required.');
   const r=await this.db.query('SELECT a.id,a.email,a.name,a.role FROM platform_sessions s JOIN platform_accounts a ON a.id=s.account_id WHERE s.token_hash=$1 AND s.expires_at>now() AND a.active=true AND (a.email_verified=true OR a.admin_approved=true)',[digest(token)]);
   if(!r.rows[0])throw new UnauthorizedException('Session expired. Sign in again.');
-  if(r.rows[0].role!=='super_admin'&&!['/admin/auth/me','/admin/auth/logout','/intake','/ai/providers'].includes(route)&&!/^\/(?:marketplace(?:\/orders\/[a-f0-9-]{36}\/verify|\/checkout)?|pacer\/(?:info|connect|disconnect|search))$/.test(route)&&!/^\/intake\/\d+\/files\/\d+$/.test(route)&&!/^\/justice(?:\/|$)/.test(route))throw new ForbiddenException('Super administrator access required.');req.admin=r.rows[0];return true;
+  if(r.rows[0].role!=='super_admin'&&!['/admin/auth/me','/admin/auth/logout','/intake','/ai/providers'].includes(route)&&!/^\/(?:marketplace(?:\/orders\/[a-f0-9-]{36}\/verify|\/checkout)?|pacer\/(?:info|connect|disconnect|search))$/.test(route)&&!/^\/intake\/\d+\/files\/\d+$/.test(route)&&!/^\/justice(?:\/|$)/.test(route))throw new ForbiddenException('Super administrator access required.');req.admin=r.rows[0];await enforceFeature(this.db,route);return true;
  }
 }

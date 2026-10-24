@@ -1,3 +1,6 @@
+import {TenantService} from '../tenant.service';
+import {licenseProfession} from '../license-policy';
+import {LicenseVerificationService,validateLicense} from '../license-verification.service';
 import {validRole} from '../justice-catalog';
 import { Body, Controller, Get, Post, BadRequestException, ServiceUnavailableException } from '@nestjs/common';
 import { randomBytes } from 'crypto';
@@ -12,13 +15,19 @@ function passwordInput(value:any){if(typeof value!=='string'||value.length<14||v
 @Controller('admin/auth')
 export class AccountAccessController {
  constructor(private db:DbService,private mail:AccountMailer){}
- @Get('options') options(){return {registrationAvailable:process.env.ALLOW_REGISTRATION!=='false',verificationMethod:this.mail.configured()?'email':'admin',resetAvailable:this.mail.configured()};}
- private available(){if(!this.mail.configured())throw new ServiceUnavailableException('Account email is unavailable. Contact the site administrator.');}
+ @Get('options') async options(){await this.mail.refresh?.();return {registrationAvailable:process.env.ALLOW_REGISTRATION!=='false',verificationMethod:this.mail.configured()?'email':'admin',resetAvailable:this.mail.configured()};}
+ private async available(){await this.mail.refresh?.();if(!this.mail.configured())throw new ServiceUnavailableException('Account email is unavailable. Contact the site administrator.');}
  @Post('register') async register(@Body() b:any){
+  await this.mail.refresh?.();
   if(process.env.ALLOW_REGISTRATION==='false')throw new ServiceUnavailableException('Registration is currently closed.');
   const email=emailInput(b.email);passwordInput(b.password);
+  if(b.workspace_type!==undefined&&!['personal','law_firm','counsel','pro_se','business','court','organization'].includes(b.workspace_type))throw new BadRequestException('Select a valid workspace type.');
+  if(b.workspace_type&&b.workspace_type!=='personal'&&(typeof b.workspace_name!=='string'||!b.workspace_name.trim()||b.workspace_name.length>200))throw new BadRequestException('Provide a workspace name (up to 200 characters).');
   const roles=b.roles===undefined?[]:b.roles;
   if(!Array.isArray(roles)||roles.length>30||roles.some((r:any)=>typeof r!=='string'||!validRole(r)))throw new BadRequestException('Select up to 30 catalog roles.');
+  const license=b.license?validateLicense(b.license):null;
+  if(license&&licenseProfession(b.license.role_id)&&licenseProfession(b.license.role_id)!==license.profession)throw new BadRequestException('License profession does not match the role.');
+  if(license&&(!roles.includes(b.license.role_id)))throw new BadRequestException('Select the license role before submitting credentials.');
   const jurisdiction=typeof b.jurisdiction==='string'?b.jurisdiction.trim():'';
   const organization=typeof b.organization==='string'?b.organization.trim():'';
   if((roles.length&&!jurisdiction)||jurisdiction.length>300||organization.length>300)throw new BadRequestException('Provide jurisdiction and organization up to 300 characters.');
@@ -26,7 +35,9 @@ export class AccountAccessController {
   // Public registration cannot claim the initial administrator or request an elevated role.
   if(!Number((await this.db.query("SELECT count(*) n FROM platform_accounts WHERE role='super_admin'")).rows[0].n))throw new ServiceUnavailableException('The administrator must finish initial setup first.');
   const hash=await passwordHash(b.password);
-  const a=(await this.db.query("WITH a AS (INSERT INTO platform_accounts(email,name,password_hash,role,email_verified) VALUES($1,$2,$3,'user',false) ON CONFLICT(email) DO NOTHING RETURNING id,email), requested AS (INSERT INTO justice_roles(account_id,role_id,organization,jurisdiction) SELECT a.id,r.role_id,$5,$6 FROM a CROSS JOIN jsonb_array_elements_text($4::jsonb) AS r(role_id) ON CONFLICT DO NOTHING RETURNING account_id) SELECT id,email FROM a",[email,b.name.trim(),hash,JSON.stringify([...new Set(roles)]),organization||'Individual',jurisdiction])).rows[0];
+  const a=(await this.db.query("WITH a AS (INSERT INTO platform_accounts(email,name,password_hash,role,email_verified) VALUES($1,$2,$3,'user',false) ON CONFLICT(email) DO NOTHING RETURNING id,email), requested AS (INSERT INTO justice_roles(account_id,role_id,organization,jurisdiction,license_claim,license_version,license_next_check) SELECT a.id,r.role_id,$5,$6,CASE WHEN r.role_id=$8 THEN $7::jsonb ELSE '{}'::jsonb END,CASE WHEN r.role_id=$8 THEN $9 ELSE '' END,CASE WHEN r.role_id=$8 THEN now() ELSE NULL END FROM a CROSS JOIN jsonb_array_elements_text($4::jsonb) AS r(role_id) ON CONFLICT DO NOTHING RETURNING account_id), phones AS (INSERT INTO phone_accounts(account_id,context_key) SELECT a.id,'personal:'||a.id FROM a ON CONFLICT DO NOTHING RETURNING id) SELECT id,email FROM a",[email,b.name.trim(),hash,JSON.stringify([...new Set(roles)]),organization||'Individual',jurisdiction,JSON.stringify(license||{}),license?b.license.role_id:'',randomBytes(16).toString('hex')])).rows[0];
+  if(a&&b.workspace_type&&b.workspace_type!=='personal')await new TenantService(this.db).create(a.id,{kind:b.workspace_type,name:b.workspace_name});
+  if(a&&license)try{await new LicenseVerificationService(this.db).check(a.id,b.license.role_id);}catch{/* Keep registration generic; pending check is retried by the worker. */}
   const pending=a||(await this.db.query("SELECT id,email FROM platform_accounts WHERE email=$1 AND active=true AND role='user' AND email_verified=false AND admin_approved=false",[email])).rows[0];
   if(pending&&this.mail.configured())await this.issue(pending,'verify');
   return registrationMessage;
@@ -51,7 +62,7 @@ export class AccountAccessController {
   }
  }
  @Post('forgot-password') async forgot(@Body() b:any){
-  this.available();const email=emailInput(b.email);
+  await this.available();const email=emailInput(b.email);
   const a=(await this.db.query('SELECT id,email,email_verified FROM platform_accounts WHERE email=$1 AND active=true',[email])).rows[0];
   if(a)await this.issue(a,a.email_verified?'reset':'verify');
   return generic;

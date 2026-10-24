@@ -1,0 +1,114 @@
+---
+# Run from a trusted controller with SSH access to both existing installations.
+- name: Prepare a private shared integration credential on the controller
+  hosts: localhost
+  connection: local
+  become: true
+  vars:
+    bridge_token_file: /etc/justisolve/integrations/sip-bridge-token
+  tasks:
+    - name: Create private credential directory
+      ansible.builtin.file:
+        path: '{{ bridge_token_file | dirname }}'
+        state: directory
+        owner: root
+        group: root
+        mode: '0700'
+    - name: Generate token once without displaying it
+      ansible.builtin.command:
+        argv: [python3, '-c', "import pathlib,secrets,os,sys; p=pathlib.Path(sys.argv[1]); fd=os.open(str(p),os.O_WRONLY|os.O_CREAT|os.O_EXCL,0o600); os.write(fd,(secrets.token_hex(32)+'\\n').encode()); os.close(fd)", '{{ bridge_token_file }}']
+        creates: '{{ bridge_token_file }}'
+      no_log: true
+
+- name: Install scoped JustiSolve provisioning bridge on SIP service
+  hosts: sip_service
+  become: true
+  vars:
+    bridge_token_file: /etc/justisolve/integrations/sip-bridge-token
+    sip_repo_dir: /opt/olamide/repo
+    sip_env_file: /etc/olamide/secrets.env
+  tasks:
+    - name: Read the private controller credential
+      ansible.builtin.slurp:
+        src: '{{ bridge_token_file }}'
+      delegate_to: localhost
+      register: bridge_private
+      no_log: true
+    - name: Validate the private shared token before using it
+      ansible.builtin.assert:
+        that:
+          - (bridge_private.content | b64decode | trim) is match('^[a-f0-9]{64}$')
+      no_log: true
+    - name: Pull SIP source preserving local tracked modifications
+      ansible.builtin.git:
+        repo: https://github.com/olamidebello/Sip.git
+        dest: '{{ sip_repo_dir }}'
+        version: main
+        force: false
+    - name: Preserve an existing matching bridge credential and reject accidental rotation
+      ansible.builtin.command:
+        argv: [python3, '-', '{{ sip_env_file }}']
+        stdin: |
+          import sys,pathlib,re
+          p=pathlib.Path(sys.argv[1]); key='{{ (bridge_private.content | b64decode).strip() }}'
+          assert re.fullmatch('[a-f0-9]{64}',key),'Invalid shared token'
+          text=p.read_text(); rows=re.findall(r'^JUSTISOLVE_BRIDGE_TOKEN=(.*)$',text,re.M)
+          assert len(rows)<=1,'Duplicate bridge token entries'
+          assert not rows or rows[0].strip().strip('\"\x27') in ('',key),'Existing SIP token differs; reuse its protected controller token file instead of rotating it'
+      changed_when: false
+      no_log: true
+    - name: Set scoped bridge credential without changing other service keys
+      ansible.builtin.lineinfile:
+        path: '{{ sip_env_file }}'
+        regexp: '^JUSTISOLVE_BRIDGE_TOKEN='
+        line: "JUSTISOLVE_BRIDGE_TOKEN={{ (bridge_private.content | b64decode).strip() }}"
+        owner: root
+        group: root
+        mode: '0600'
+      no_log: true
+    - name: Rebuild and restart only SIP API and web
+      ansible.builtin.command:
+        argv: [docker, compose, '--env-file', '{{ sip_env_file }}', up, '-d', '--build', '--no-deps', api, web]
+        chdir: '{{ sip_repo_dir }}/deployment/docker'
+    - name: Verify SIP bridge module health without exposing token
+      ansible.builtin.command:
+        argv: [docker, compose, '--env-file', '{{ sip_env_file }}', exec, '-T', api, node, '-e', "fetch('http://127.0.0.1:8080/api/integrations/justisolve/health',{method:'POST',headers:{Authorization:'Bearer '+process.env.JUSTISOLVE_BRIDGE_TOKEN}}).then(r=>{if(!r.ok)throw Error()}).catch(()=>process.exit(1))"]
+        chdir: '{{ sip_repo_dir }}/deployment/docker'
+      register: sip_bridge_ready
+      retries: 15
+      delay: 4
+      until: sip_bridge_ready.rc == 0
+      changed_when: false
+      no_log: true
+
+- name: Configure JustiSolve to use its scoped SIP bridge
+  hosts: justisolve_app
+  become: true
+  vars:
+    bridge_token_file: /etc/justisolve/integrations/sip-bridge-token
+    app_dir: /opt/aicourtsystem
+    compose_project: docker
+  tasks:
+    - name: Read shared private credential
+      ansible.builtin.slurp:
+        src: '{{ bridge_token_file }}'
+      delegate_to: localhost
+      register: bridge_private
+      no_log: true
+    - name: Validate the private shared token before using it
+      ansible.builtin.assert:
+        that:
+          - (bridge_private.content | b64decode | trim) is match('^[a-f0-9]{64}$')
+      no_log: true
+    - name: Save the token encrypted using the existing application encryption key
+      ansible.builtin.command:
+        argv: [docker, compose, '-p', '{{ compose_project }}', '--env-file', .env, '-f', docker/docker-compose.yml, exec, '-T', api, node, '-']
+        chdir: '{{ app_dir }}'
+        stdin: |
+          const {DbService}=require('./dist/db.service');const {CommerceService}=require('./dist/commerce.service');
+          const db=new DbService(),key='{{ (bridge_private.content | b64decode).strip() }}';
+          (async()=>{if(!/^[a-f0-9]{64}$/.test(key))throw Error();const c=await db.pool.connect();try{await c.query('BEGIN');await new CommerceService(db).saveSecret('sip_bridge_token',key,c);await c.query("INSERT INTO platform_settings(key,value) VALUES('sip_integration','{\"enabled\":true}') ON CONFLICT(key) DO UPDATE SET value=excluded.value,updated_at=now()");await c.query('UPDATE phone_accounts SET next_attempt=now()');await c.query("INSERT INTO audit_log(actor,action,entity_type,entity_id) VALUES('server-admin','sip_bridge_linked','communications','sip')");await c.query('COMMIT');}catch(e){await c.query('ROLLBACK');throw e;}finally{c.release();}})().catch(()=>{process.exitCode=1;}).finally(()=>db.onModuleDestroy());
+      no_log: true
+    - name: Report linked services
+      ansible.builtin.debug:
+        msg: 'Scoped SIP bridge linked. Open Email & Phone Services to test readiness. New signups and organizational workspaces are queued automatically; phone switch, WebRTC networking, subscriptions and carrier funding remain independent service prerequisites.'

@@ -1,0 +1,60 @@
+---
+- name: Enable durable SIP and PBX account synchronization
+  hosts: all
+  become: true
+  vars:
+    app_dir: /opt/aicourtsystem
+    compose_project: docker
+  tasks:
+    - name: Validate deployment paths
+      ansible.builtin.assert:
+        that:
+          - app_dir is match('^/[A-Za-z0-9/_-]+$')
+          - compose_project is match('^[a-z0-9][a-z0-9_-]*$')
+    - name: Install phone synchronization runner
+      ansible.builtin.copy:
+        dest: /usr/local/sbin/justisolve-phone-refresh
+        owner: root
+        group: root
+        mode: '0700'
+        content: |
+          #!/bin/sh
+          set -eu
+          cd {{ app_dir | quote }}
+          if docker compose version >/dev/null 2>&1; then set -- docker compose; else set -- docker-compose; fi
+          exec "$@" -p {{ compose_project | quote }} --env-file .env -f docker/docker-compose.yml exec -T api node -e '
+          const {DbService}=require("./dist/db.service");const {PhoneService}=require("./dist/phone.service");const db=new DbService();
+          new PhoneService(db).refreshDue(100).then(r=>console.log(JSON.stringify(r))).catch(()=>{console.error("Phone synchronization failed; no credentials logged.");process.exitCode=1;}).finally(()=>db.onModuleDestroy());'
+    - name: Install phone refresh service
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/justisolve-phone-refresh.service
+        content: |
+          [Unit]
+          Description=JustiSolve SIP and PBX synchronization
+          After=docker.service network-online.target
+          [Service]
+          Type=oneshot
+          ExecStart=/usr/local/sbin/justisolve-phone-refresh
+          TimeoutStartSec=10min
+          NoNewPrivileges=true
+          PrivateTmp=true
+        mode: '0644'
+    - name: Install phone refresh timer
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/justisolve-phone-refresh.timer
+        content: |
+          [Unit]
+          Description=Retry pending JustiSolve SIP and PBX accounts
+          [Timer]
+          OnBootSec=2min
+          OnUnitActiveSec=1min
+          RandomizedDelaySec=10
+          [Install]
+          WantedBy=timers.target
+        mode: '0644'
+    - name: Enable phone synchronization
+      ansible.builtin.systemd:
+        name: justisolve-phone-refresh.timer
+        daemon_reload: true
+        enabled: true
+        state: started

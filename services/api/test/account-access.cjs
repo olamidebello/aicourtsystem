@@ -7,7 +7,7 @@ const {passwordMatches,digest}=require('../dist/auth');
 async function fixture(){
  const sql=new PGlite();
  await sql.exec('CREATE TABLE tenants(tenant_id BIGSERIAL PRIMARY KEY); INSERT INTO tenants DEFAULT VALUES; CREATE TABLE cases(case_id BIGSERIAL PRIMARY KEY); CREATE TABLE drafts(draft_id BIGSERIAL PRIMARY KEY); CREATE TABLE audit_log(actor TEXT,action TEXT,entity_type TEXT,entity_id TEXT,meta JSONB);');
- await sql.exec(ADMIN_SCHEMA);await sql.exec(ADMIN_SCHEMA);await sql.exec(require('../dist/justice-schema').JUSTICE_SCHEMA);
+ await sql.exec(ADMIN_SCHEMA);await sql.exec(ADMIN_SCHEMA);await sql.exec(require('../dist/justice-schema').JUSTICE_SCHEMA);await sql.exec(require('../dist/communications-schema').COMMUNICATIONS_SCHEMA);
  const db={query:(q,p=[])=>sql.query(q,p),pool:{connect:async()=>({query:(q,p=[])=>sql.query(q,p),release(){}})}};
  await db.query("INSERT INTO platform_accounts(email,name,password_hash) VALUES('admin@example.test','Admin','unused')");
  const messages=[];const mail={configured:()=>true,send:async(email,token,purpose)=>messages.push({email,token,purpose})};
@@ -17,7 +17,7 @@ test('registration fixes role to user, hashes tokens and requires email verifica
  const f=await fixture();try{
   await f.controller.register({name:'New User',email:'new@example.test',password:'a-unique-long-password',role:'super_admin'});
   const a=(await f.db.query("SELECT * FROM platform_accounts WHERE email='new@example.test'")).rows[0];
-  assert.equal(a.role,'user');assert.equal(a.email_verified,false);assert.equal(await passwordMatches('a-unique-long-password',a.password_hash),true);
+  assert.equal(a.role,'user');assert.equal((await f.db.query('SELECT * FROM phone_accounts WHERE account_id=$1',[a.id])).rows.length,1);assert.equal(a.email_verified,false);assert.equal(await passwordMatches('a-unique-long-password',a.password_hash),true);
   const login=new AdminController(f.db);await assert.rejects(login.login({email:a.email,password:'a-unique-long-password'},{}),/verification|approval/);
   assert.equal(f.messages[0].purpose,'verify');
   const stored=(await f.db.query('SELECT token_hash FROM platform_account_tokens')).rows[0];assert.equal(stored.token_hash,digest(f.messages[0].token));assert.notEqual(stored.token_hash,f.messages[0].token);
@@ -60,7 +60,7 @@ test('tokens cannot be used for the wrong purpose',async()=>{
 test('signup remains available without mail while password recovery requires mail',async()=>{
  const f=await fixture();try{
   await assert.rejects(f.controller.register({name:'New',email:'invalid',password:'short'}));f.mail.configured=()=>false;
-  assert.equal(f.controller.options().registrationAvailable,true);assert.equal(f.controller.options().verificationMethod,'admin');
+  assert.equal((await f.controller.options()).registrationAvailable,true);assert.equal((await f.controller.options()).verificationMethod,'admin');
   await assert.rejects(f.controller.forgot({email:'admin@example.test'}),/unavailable/);
   await f.controller.register({name:'New',email:'new@example.test',password:'a-long-unique-password'});const account=(await f.db.query("SELECT * FROM platform_accounts WHERE email='new@example.test'")).rows[0];assert.equal(account.email_verified,false);assert.equal(account.admin_approved,false);assert.equal(account.role,'user');
  }finally{await f.sql.close();}

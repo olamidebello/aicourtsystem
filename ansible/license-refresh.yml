@@ -1,0 +1,68 @@
+---
+- name: Install automatic credential rechecks on the existing JustiSolve server
+  hosts: all
+  become: true
+  vars:
+    app_dir: /opt/aicourtsystem
+    compose_project: docker
+  tasks:
+    - name: Validate installation paths
+      ansible.builtin.assert:
+        that:
+          - app_dir is match('^/[A-Za-z0-9/_-]+$')
+          - compose_project is match('^[a-z0-9][a-z0-9_-]*$')
+    - name: Install credential refresh runner without credentials in command arguments
+      ansible.builtin.copy:
+        dest: /usr/local/sbin/justisolve-license-refresh
+        owner: root
+        group: root
+        mode: '0700'
+        content: |
+          #!/bin/sh
+          set -eu
+          cd {{ app_dir | quote }}
+          if docker compose version >/dev/null 2>&1; then set -- docker compose; else set -- docker-compose; fi
+          exec "$@" -p {{ compose_project | quote }} --env-file .env -f docker/docker-compose.yml exec -T api node -e '
+          const {DbService}=require("./dist/db.service");
+          const {LicenseVerificationService}=require("./dist/license-verification.service");
+          const db=new DbService();
+          new LicenseVerificationService(db).refreshDue(30).then(r=>console.log(JSON.stringify(r))).catch(()=>{console.error("Credential refresh failed; no credentials logged.");process.exitCode=1;}).finally(()=>db.onModuleDestroy());'
+    - name: Install credential refresh service
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/justisolve-license-refresh.service
+        owner: root
+        group: root
+        mode: '0644'
+        content: |
+          [Unit]
+          Description=JustiSolve professional credential rechecks
+          After=docker.service network-online.target
+          Wants=network-online.target
+          [Service]
+          Type=oneshot
+          ExecStart=/usr/local/sbin/justisolve-license-refresh
+          TimeoutStartSec=12min
+          NoNewPrivileges=true
+          PrivateTmp=true
+    - name: Install automatic credential refresh schedule
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/justisolve-license-refresh.timer
+        owner: root
+        group: root
+        mode: '0644'
+        content: |
+          [Unit]
+          Description=Check due JustiSolve credentials in bounded batches
+          [Timer]
+          OnBootSec=5min
+          OnUnitActiveSec=15min
+          RandomizedDelaySec=60
+          Persistent=true
+          [Install]
+          WantedBy=timers.target
+    - name: Enable credential refresh timer
+      ansible.builtin.systemd:
+        name: justisolve-license-refresh.timer
+        daemon_reload: true
+        enabled: true
+        state: started

@@ -70,6 +70,7 @@ test('ordinary user cannot mount the administrator dashboard',async()=>{
  try{
   await act(async()=>{tree=create(React.createElement(Home));await flush();});
   assert.equal(requests.includes('/api/dashboard'),false);
+  await act(async()=>{tree.root.findAllByType('button').find(b=>b.children.includes('My PACER access')).props.onClick();await flush();});
   assert.match(JSON.stringify(tree.toJSON()),/My own PACER account/);
   assert.match(JSON.stringify(tree.toJSON()),/System PACER account/);
   const connect=tree.root.findAllByType('button').find(b=>b.children.includes('Connect to PACER'));
@@ -93,7 +94,7 @@ test('registration sends new account input and returns to sign in',async()=>{
   await act(async()=>{tree=create(React.createElement(Home));await flush();});
   act(()=>tree.root.findAllByType('button').find(b=>b.children.includes('Create account')).props.onClick());
   act(()=>{tree.root.findAllByType('input').forEach((input,i)=>input.props.onChange({target:{value:['New User','new@example.test','a-long-unique-password','a-long-unique-password'][i]}}));});
-  await act(async()=>{tree.root.findByType('form').props.onSubmit({preventDefault(){}});await flush();});
+  for(let step=0;step<5;step++)await act(async()=>{tree.root.findByType('form').props.onSubmit({preventDefault(){}});await flush();});
   assert.equal(submitted.name,'New User');assert.equal(submitted.email,'new@example.test');
   assert.match(JSON.stringify(tree.toJSON()),/Check your email/);
   assert.equal(tree.root.findByType('h1').children[0],'Sign In');
