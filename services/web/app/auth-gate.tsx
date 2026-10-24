@@ -1,4 +1,6 @@
 'use client';
+import Justice from './justice';
+import RolePicker from './role-picker';
 import Marketplace from './marketplace';
 import Pacer from './pacer';
 import Intake from './intake';
@@ -13,6 +15,7 @@ type Mode='login'|'register'|'forgot'|'reset'|'verify';
 export default function AuthGate({children}:{children:React.ReactNode}){
  const [user,setUser]=useState<any>(null),[loading,setLoading]=useState(true),[setup,setSetup]=useState(false),[busy,setBusy]=useState(false),[error,setError]=useState(''),[notice,setNotice]=useState('');
  const [mode,setMode]=useState<Mode>('login'),[token,setToken]=useState(''),[options,setOptions]=useState({registrationAvailable:false,resetAvailable:false,verificationMethod:'email'});
+ const [roles,setRoles]=useState<string[]>([]),[jurisdiction,setJurisdiction]=useState(''),[organization,setOrganization]=useState('');
  const [form,setForm]=useState({email:'',password:'',confirm:'',name:'',setupToken:''});
  useEffect(()=>{
   const link=new URLSearchParams(window.location.hash.slice(1));const action=link.get('action');
@@ -25,7 +28,7 @@ export default function AuthGate({children}:{children:React.ReactNode}){
   try{
    if((mode==='register'||mode==='reset')&&form.password!==form.confirm)throw Error('Passwords do not match.');
    const endpoint=setup?'bootstrap':({login:'login',register:'register',forgot:'forgot-password',reset:'reset-password',verify:'verify-email'}[mode]);
-   const body=setup?form:mode==='reset'?{token,password:form.password}:mode==='verify'?{token}:mode==='forgot'?{email:form.email}:form;
+   const body=setup?form:mode==='reset'?{token,password:form.password}:mode==='verify'?{token}:mode==='forgot'?{email:form.email}:mode==='register'?{...form,roles,jurisdiction,organization}:form;
    const d=await readAuthResponse(await fetch('/api/admin/auth/'+endpoint,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}));
    if(setup){setSetup(false);setMode('login');setNotice('Administrator created. Sign in with your new credentials.');}
    else if(mode==='login')setUser(d);
@@ -41,6 +44,7 @@ export default function AuthGate({children}:{children:React.ReactNode}){
    <p>{mode==='register'?(options.verificationMethod==='admin'?'Create your private case intake account. Email delivery is not configured; an administrator must approve your account before you can sign in.':'Create your private case intake account. Verify your email before signing in. If no email arrives, contact the administrator for approval.'):mode==='forgot'?(options.resetAvailable?'Enter your account email. Eligible accounts receive recovery email; unverified accounts receive a verification link first. If nothing arrives, ask the administrator for a reset link.':'Email recovery is unavailable. Ask your JustiSolve administrator to open Accounts and generate a password-reset link for you. The link lets you choose your own new password.'):mode==='verify'?'Confirm the account you requested. This link expires after 30 minutes.':mode==='reset'?'Use a unique password of 14–200 characters. Updating it will sign out all existing sessions.':'Sign in to your private workspace. Administrative records require a super-admin role.'}</p>
    <form onSubmit={e=>{e.preventDefault();submit();}}>
     {fields.map(k=><label key={k} style={{display:'block',margin:'12px 0'}}>{({name:'Name',email:'Email',password:'Password',confirm:'Confirm password',setupToken:'One-time server setup token'} as any)[k]}<input style={{display:'block',width:'100%'}} required maxLength={k==='email'?254:200} minLength={['password','confirm'].includes(k)&&(setup||mode!=='login')?14:undefined} type={['password','confirm','setupToken'].includes(k)?'password':k==='email'?'email':'text'} autoComplete={k==='password'?(setup||mode!=='login'?'new-password':'current-password'):k==='confirm'?'new-password':k==='email'?'username':'off'} value={(form as any)[k]} onChange={e=>{const value=e.target.value;setForm(f=>({...f,[k]:value}));}}/></label>)}
+    {mode==='register'&&<><RolePicker selected={roles} onChange={setRoles}/><label>Organization<input maxLength={300} value={organization} onChange={e=>setOrganization(e.target.value)}/></label><label>Country / jurisdiction<input required={roles.length>0} maxLength={300} value={jurisdiction} onChange={e=>setJurisdiction(e.target.value)}/></label></>}
     {(mode==='register'||mode==='reset')&&<p>Use a password of 14–200 characters. Both password fields must match.</p>}
     <button type="submit" className="primary" disabled={busy||(mode==='forgot'&&!options.resetAvailable)||((mode==='verify'||mode==='reset')&&!token)}>{busy?'Working…':setup?'Create Super Admin':({login:'Sign In',register:'Register',forgot:'Send Recovery Email',reset:'Update Password',verify:'Verify Email'}[mode])}</button>
    </form>
@@ -50,5 +54,5 @@ export default function AuthGate({children}:{children:React.ReactNode}){
    <p><a href="/news">Public News</a> · <a href="/policies">Terms & Privacy</a></p>
   </section></main>;
  }
- return <><div style={{padding:'8px 20px',background:'#0d1a30',textAlign:'right'}}>{user.email} <button className="primary" disabled={busy} onClick={logout}>Sign out</button>{error&&<p role="alert">{error}</p>}</div>{user.role==='super_admin'?children:<main style={{maxWidth:1100,margin:'auto'}}><Intake/><Marketplace api="/api"/><Pacer api="/api"/><p><a href="/news">News</a> · <a href="/policies">Terms & Privacy</a></p></main>}</>;
+ return <><div style={{padding:'8px 20px',background:'#0d1a30',textAlign:'right'}}>{user.email} <button className="primary" disabled={busy} onClick={logout}>Sign out</button>{error&&<p role="alert">{error}</p>}</div>{user.role==='super_admin'?children:<main style={{maxWidth:1100,margin:'auto'}}><Justice/><Intake/><Marketplace api="/api"/><Pacer api="/api"/><p><a href="/news">News</a> · <a href="/policies">Terms & Privacy</a></p></main>}</>;
 }

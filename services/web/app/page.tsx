@@ -1,4 +1,5 @@
 'use client';
+import Justice from './justice';
 import Marketplace from './marketplace';
 import Intake from './intake';
 import Admin from './admin';
@@ -9,7 +10,7 @@ import Pacer from './pacer';
 import {useEffect,useMemo,useState} from 'react';
 
 const modules=[
- ['marketplace','Marketplace & Wallet'],['dashboard','Dashboard'],['intake','Case Intake'],['news','News'],['pacer','PACER Records'],['cases','Cases'],['dockets','Dockets'],['documents','Documents'],['evidence','Evidence'],
+ ['justice','Judicial Roles & Workspaces'],['marketplace','Marketplace & Wallet'],['dashboard','Dashboard'],['intake','Case Intake'],['news','News'],['pacer','PACER Records'],['cases','Cases'],['dockets','Dockets'],['documents','Documents'],['evidence','Evidence'],
  ['transcripts','Transcripts'],['research','Legal Research'],['draft','AI Drafting'],['ensemble','Multi-model Motions'],['analyze','AI Analysis'],
  ['tasks','Tasks'],['deadlines','Deadlines'],['alerts','Alerts'],['audit','Audit & Compliance'],['admin','Administration']
 ];
@@ -46,6 +47,7 @@ function Workspace(){
    </header>
    {error&&<div className="panel error" role="alert">{error}</div>}
    {busy&&<div className="notice">Working…</div>}
+   {tab==='justice'&&<Justice admin/>}
    {tab==='intake'&&<Intake/>}
    {tab==='news'&&<NewsFeed/>}
    {tab==='marketplace'&&<Marketplace api={API}/>}

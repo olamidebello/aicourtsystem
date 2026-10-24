@@ -7,7 +7,7 @@ const {passwordMatches,digest}=require('../dist/auth');
 async function fixture(){
  const sql=new PGlite();
  await sql.exec('CREATE TABLE tenants(tenant_id BIGSERIAL PRIMARY KEY); INSERT INTO tenants DEFAULT VALUES; CREATE TABLE cases(case_id BIGSERIAL PRIMARY KEY); CREATE TABLE drafts(draft_id BIGSERIAL PRIMARY KEY); CREATE TABLE audit_log(actor TEXT,action TEXT,entity_type TEXT,entity_id TEXT,meta JSONB);');
- await sql.exec(ADMIN_SCHEMA);await sql.exec(ADMIN_SCHEMA);
+ await sql.exec(ADMIN_SCHEMA);await sql.exec(ADMIN_SCHEMA);await sql.exec(require('../dist/justice-schema').JUSTICE_SCHEMA);
  const db={query:(q,p=[])=>sql.query(q,p),pool:{connect:async()=>({query:(q,p=[])=>sql.query(q,p),release(){}})}};
  await db.query("INSERT INTO platform_accounts(email,name,password_hash) VALUES('admin@example.test','Admin','unused')");
  const messages=[];const mail={configured:()=>true,send:async(email,token,purpose)=>messages.push({email,token,purpose})};

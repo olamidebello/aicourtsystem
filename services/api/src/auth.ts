@@ -12,7 +12,7 @@ export class AccessGuard implements CanActivate {
  constructor(private db:DbService){}
  async canActivate(context:ExecutionContext){
   const req=context.switchToHttp().getRequest();const route=req.path.replace(/^\/api/,'').replace(/\/$/,'');
-  if(['/health','/admin/auth/status','/admin/auth/bootstrap','/admin/auth/login','/admin/auth/options','/admin/auth/register','/admin/auth/forgot-password','/admin/auth/reset-password','/admin/auth/verify-email','/news','/policy/requests'].includes(route))return true;
+  if(['/health','/justice/catalog','/admin/auth/status','/admin/auth/bootstrap','/admin/auth/login','/admin/auth/options','/admin/auth/register','/admin/auth/forgot-password','/admin/auth/reset-password','/admin/auth/verify-email','/news','/policy/requests'].includes(route))return true;
   if(req.method==='GET'&&/^\/news\/\d+\/media\/(audio|video)$/.test(route))return true;
   if(route==='/internal/ai/config'){if(!secretMatches(req.headers['x-ai-config-token']||'',process.env.AI_CONFIG_TOKEN||''))throw new UnauthorizedException();return true;}
   if(route==='/internal/news/tick'){
@@ -31,6 +31,6 @@ export class AccessGuard implements CanActivate {
   if(!/^[a-f0-9]{64}$/.test(token))throw new UnauthorizedException('Administrator sign-in required.');
   const r=await this.db.query('SELECT a.id,a.email,a.name,a.role FROM platform_sessions s JOIN platform_accounts a ON a.id=s.account_id WHERE s.token_hash=$1 AND s.expires_at>now() AND a.active=true AND (a.email_verified=true OR a.admin_approved=true)',[digest(token)]);
   if(!r.rows[0])throw new UnauthorizedException('Session expired. Sign in again.');
-  if(r.rows[0].role!=='super_admin'&&!['/admin/auth/me','/admin/auth/logout','/intake','/ai/providers'].includes(route)&&!/^\/(?:marketplace(?:\/orders\/[a-f0-9-]{36}\/verify|\/checkout)?|pacer\/(?:info|connect|disconnect|search))$/.test(route)&&!/^\/intake\/\d+\/files\/\d+$/.test(route))throw new ForbiddenException('Super administrator access required.');req.admin=r.rows[0];return true;
+  if(r.rows[0].role!=='super_admin'&&!['/admin/auth/me','/admin/auth/logout','/intake','/ai/providers'].includes(route)&&!/^\/(?:marketplace(?:\/orders\/[a-f0-9-]{36}\/verify|\/checkout)?|pacer\/(?:info|connect|disconnect|search))$/.test(route)&&!/^\/intake\/\d+\/files\/\d+$/.test(route)&&!/^\/justice(?:\/|$)/.test(route))throw new ForbiddenException('Super administrator access required.');req.admin=r.rows[0];return true;
  }
 }

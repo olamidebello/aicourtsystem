@@ -1,3 +1,4 @@
+import {validRole} from '../justice-catalog';
 import { Body, Controller, Get, Post, BadRequestException, ServiceUnavailableException } from '@nestjs/common';
 import { randomBytes } from 'crypto';
 import { DbService } from '../db.service';
@@ -16,11 +17,16 @@ export class AccountAccessController {
  @Post('register') async register(@Body() b:any){
   if(process.env.ALLOW_REGISTRATION==='false')throw new ServiceUnavailableException('Registration is currently closed.');
   const email=emailInput(b.email);passwordInput(b.password);
+  const roles=b.roles===undefined?[]:b.roles;
+  if(!Array.isArray(roles)||roles.length>30||roles.some((r:any)=>typeof r!=='string'||!validRole(r)))throw new BadRequestException('Select up to 30 catalog roles.');
+  const jurisdiction=typeof b.jurisdiction==='string'?b.jurisdiction.trim():'';
+  const organization=typeof b.organization==='string'?b.organization.trim():'';
+  if((roles.length&&!jurisdiction)||jurisdiction.length>300||organization.length>300)throw new BadRequestException('Provide jurisdiction and organization up to 300 characters.');
   if(typeof b.name!=='string'||!b.name.trim()||b.name.length>200)throw new BadRequestException('Enter your name (up to 200 characters).');
   // Public registration cannot claim the initial administrator or request an elevated role.
   if(!Number((await this.db.query("SELECT count(*) n FROM platform_accounts WHERE role='super_admin'")).rows[0].n))throw new ServiceUnavailableException('The administrator must finish initial setup first.');
   const hash=await passwordHash(b.password);
-  const a=(await this.db.query("INSERT INTO platform_accounts(email,name,password_hash,role,email_verified) VALUES($1,$2,$3,'user',false) ON CONFLICT(email) DO NOTHING RETURNING id,email",[email,b.name.trim(),hash])).rows[0];
+  const a=(await this.db.query("WITH a AS (INSERT INTO platform_accounts(email,name,password_hash,role,email_verified) VALUES($1,$2,$3,'user',false) ON CONFLICT(email) DO NOTHING RETURNING id,email), requested AS (INSERT INTO justice_roles(account_id,role_id,organization,jurisdiction) SELECT a.id,r.role_id,$5,$6 FROM a CROSS JOIN jsonb_array_elements_text($4::jsonb) AS r(role_id) ON CONFLICT DO NOTHING RETURNING account_id) SELECT id,email FROM a",[email,b.name.trim(),hash,JSON.stringify([...new Set(roles)]),organization||'Individual',jurisdiction])).rows[0];
   const pending=a||(await this.db.query("SELECT id,email FROM platform_accounts WHERE email=$1 AND active=true AND role='user' AND email_verified=false AND admin_approved=false",[email])).rows[0];
   if(pending&&this.mail.configured())await this.issue(pending,'verify');
   return registrationMessage;

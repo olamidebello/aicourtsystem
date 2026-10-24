@@ -1,0 +1,42 @@
+---
+- name: Update and build role workspaces and supervised AI proceedings
+  ansible.builtin.import_playbook: pull-and-install.yml
+
+- name: Verify judicial platform resources and access protection
+  hosts: all
+  become: true
+  vars:
+    app_dir: /opt/aicourtsystem
+    compose_project: docker
+  tasks:
+    - name: Detect Compose plugin
+      ansible.builtin.command: docker compose version
+      register: justice_plugin
+      changed_when: false
+      failed_when: false
+    - name: Select Compose command
+      ansible.builtin.set_fact:
+        justice_compose: "{{ 'docker compose' if justice_plugin.rc == 0 else 'docker-compose' }}"
+    - name: Verify catalog, protected endpoints and migrated tables
+      ansible.builtin.command:
+        argv: "{{ justice_compose.split() + ['-p',compose_project,'--env-file','.env','-f','docker/docker-compose.yml','exec','-T','api','node','-'] }}"
+        chdir: '{{ app_dir }}'
+        stdin: |
+          const {Pool}=require('pg');
+          (async()=>{
+            const origin='http://127.0.0.1:4000/api/justice';
+            const r=await fetch(origin+'/catalog');if(r.status!==200)throw Error('Catalog unavailable');
+            const catalog=await r.json();if(catalog.length<160||new Set(catalog.map(r=>r.group)).size!==14)throw Error('Incomplete role catalog');
+            for(const route of ['/profile','/matters','/reviews','/matters/1/proceedings'])if((await fetch(origin+route)).status!==401)throw Error('Authentication boundary failed');
+            const db=new Pool({connectionString:process.env.DATABASE_URL});
+            try{for(const table of ['justice_roles','justice_matters','justice_members','justice_work','justice_proceedings'])if(!(await db.query('SELECT to_regclass($1) ready',[table])).rows[0].ready)throw Error('Missing schema');}finally{await db.end();}
+            console.log('Role catalog, case protection and proceedings schema verified. No AI calls made.');
+          })().catch(()=>{console.error('Judicial platform verification failed.');process.exitCode=1;});
+      register: justice_check
+      changed_when: false
+      retries: 10
+      delay: 3
+      until: justice_check.rc == 0
+    - name: Report next setup steps
+      ansible.builtin.debug:
+        msg: 'Open Judicial Roles & Workspaces, review role requests, create a private case, and assign approved members. Configure AI models under AI Provisioning. Trials, hearings and appeals are supervised simulations; no official filings or enforceable orders are automated.'

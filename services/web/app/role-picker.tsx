@@ -1,0 +1,7 @@
+'use client';
+import {useEffect,useState} from 'react';
+export default function RolePicker({selected,onChange}:{selected:string[],onChange:(v:string[])=>void}){
+ const [roles,setRoles]=useState<any[]>([]),[query,setQuery]=useState(''),[error,setError]=useState('');
+ useEffect(()=>{fetch('/api/justice/catalog').then(r=>{if(!r.ok)throw Error();return r.json();}).then(rows=>setRoles(Array.isArray(rows)?rows:[])).catch(()=>setError('Role catalog unavailable. Try again later or add roles after signing in.'));},[]);
+ return <fieldset><legend>Select one or more roles ({selected.length}/30)</legend><p>These are requested roles. Approval and explicit case assignment determine access. Selecting a role does not establish credentials or grant official authority.</p><input aria-label="Find role" placeholder="Find role…" value={query} onChange={e=>setQuery(e.target.value)}/>{error&&<p role="alert">{error}</p>}<div style={{maxHeight:300,overflowY:'auto'}}>{Array.from(new Set(roles.map(r=>r.category))).map(category=><div key={category}><h3>{category}</h3>{roles.filter(r=>r.category===category&&r.label.toLowerCase().includes(query.toLowerCase())).map(r=><label key={r.id} style={{display:'block',padding:5}}><input type="checkbox" checked={selected.includes(r.id)} disabled={!selected.includes(r.id)&&selected.length>=30} onChange={e=>onChange(e.target.checked?[...selected,r.id]:selected.filter(id=>id!==r.id))}/>{r.label}</label>)}</div>)}</div></fieldset>;
+}
