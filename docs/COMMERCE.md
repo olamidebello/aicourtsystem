@@ -85,3 +85,27 @@ ansible-pull -U https://github.com/olamidebello/justisolve.git -C main -d /opt/j
 This playbook saves the recovery result to `/etc/justisolve/recovery/password-reset.json`, readable only by root; it does not print the token into Ansible logs. Read `reset_url` privately and open it within 30 minutes. The command requires the existing installation and running Docker, with `app_dir` and `compose_project` overrides as described above. It only issues the link: no password is changed until the owner submits the reset form. Links are stored as hashes in the database and issuance is audited without the token. Account approval, email verification, role and enabled state are preserved.
 
 The reset handler now actually updates passwords for active admin-approved accounts whose email remains unverified, rather than reporting success after a no-op update. A completed reset invalidates existing sessions and JustiSolve API keys. Pending accounts remain pending after a password reset; disabled accounts cannot reset. Existing expiry, single-use and token-purpose checks still apply.
+
+
+### Repair registration approval and password recovery without SMTP
+
+Run on the existing production server as root:
+
+```bash
+ansible-pull -U https://github.com/olamidebello/justisolve.git -C main \
+  -d /opt/justisolve-bootstrap -i localhost, -c local \
+  ansible/fix-account-access.yml -e reset_email=dobtablewater@gmail.com
+```
+
+This updates the installation, approves only the exact existing active account,
+and writes a single-use reset link to `/etc/justisolve/recovery/password-reset.json`
+(root only, mode 0600). Read that file privately and open `reset_url` within 30
+minutes to choose the password. No SMTP is required. Missing or inactive accounts
+fail without creating or enabling accounts. The role and email verification flag
+are preserved. Each approval and reset issuance is audited; tokens are hashed in
+the database and omitted from Ansible logs. Rerunning invalidates earlier links.
+Do not schedule this playbook: run only for an authorized account recovery.
+Use `-e app_dir=/actual/checkout -e compose_project=actual-project` for a custom
+installation. This fixes access for the selected account; email delivery still
+requires working SMTP configuration. The original `recover-account.yml` keeps
+approval disabled by default.

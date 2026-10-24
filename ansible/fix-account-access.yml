@@ -1,0 +1,6 @@
+---
+# Explicit operator-run repair: never run periodically or expose as a public route.
+- name: Update JustiSolve, approve the selected account, and issue a private reset link
+  ansible.builtin.import_playbook: recover-account.yml
+  vars:
+    recovery_approve_account: true

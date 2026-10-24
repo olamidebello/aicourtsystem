@@ -24,9 +24,9 @@
     - name: Select Compose command
       ansible.builtin.set_fact:
         recovery_compose: "{{ 'docker compose' if recovery_plugin.rc == 0 else 'docker-compose' }}"
-    - name: Issue reset token without changing password, role, or approval
+    - name: Issue reset token and optionally approve the exact account
       ansible.builtin.command:
-        argv: "{{ recovery_compose.split() + ['-p',compose_project,'--env-file','.env','-f','docker/docker-compose.yml','exec','-T','api','node','-',reset_email | lower | trim] }}"
+        argv: "{{ recovery_compose.split() + ['-p',compose_project,'--env-file','.env','-f','docker/docker-compose.yml','exec','-T','api','node','-',reset_email | lower | trim, (recovery_approve_account | default(false) | bool) | ternary('true','false')] }}"
         chdir: '{{ app_dir }}'
         stdin: |
           const {Pool}=require('pg');
@@ -38,14 +38,19 @@
             const db=await pool.connect();
             try{
               await db.query('BEGIN');
-              const found=await db.query('SELECT id,email FROM platform_accounts WHERE lower(email)=$1 AND active=true FOR UPDATE',[process.argv[2]]);
+              const found=await db.query('SELECT id,email,admin_approved FROM platform_accounts WHERE lower(email)=$1 AND active=true FOR UPDATE',[process.argv[2]]);
               if(found.rows.length!==1)throw Error('Exactly one active account must match the email.');
               const account=found.rows[0],token=randomBytes(32).toString('hex');
+              const approve=process.argv[3]==='true';
+              if(approve&&!account.admin_approved){
+                await db.query('UPDATE platform_accounts SET admin_approved=true WHERE id=$1',[account.id]);
+                await db.query("INSERT INTO audit_log(actor,action,entity_type,entity_id) VALUES('server-admin','account_approved','account',$1)",[String(account.id)]);
+              }
               await db.query('DELETE FROM platform_account_tokens WHERE account_id=$1',[account.id]);
               const expires=(await db.query("INSERT INTO platform_account_tokens(token_hash,account_id,purpose,expires_at) VALUES($1,$2,'reset',now()+interval '30 minutes') RETURNING expires_at",[createHash('sha256').update(token).digest('hex'),account.id])).rows[0].expires_at;
               await db.query("INSERT INTO audit_log(actor,action,entity_type,entity_id) VALUES('server-admin','admin_reset_link_issued','account',$1)",[String(account.id)]);
               await db.query('COMMIT');
-              console.log(JSON.stringify({email:account.email,expires_at:expires,reset_url:origin.origin+'/#'+new URLSearchParams({action:'reset',token}).toString()}));
+              console.log(JSON.stringify({email:account.email,admin_approved:approve||account.admin_approved,expires_at:expires,reset_url:origin.origin+'/#'+new URLSearchParams({action:'reset',token}).toString()}));
             }catch(e){await db.query('ROLLBACK');console.error(e.message||'Reset link could not be issued.');process.exitCode=1;}
             finally{db.release();await pool.end();}
           })().catch(()=>{console.error('Recovery configuration or database connection failed.');process.exitCode=1;});
@@ -68,4 +73,4 @@
       no_log: true
     - name: Explain the remaining account-owner step
       ansible.builtin.debug:
-        msg: 'The single-use link is saved in /etc/justisolve/recovery/password-reset.json (root only). Open reset_url within 30 minutes to choose a new password. No password or account approval was changed by this playbook.'
+        msg: 'The single-use link is saved in /etc/justisolve/recovery/password-reset.json (root only). Open reset_url within 30 minutes to choose a new password. The password changes only after the owner submits a new one. Account approval is enabled only when recovery_approve_account=true; role and email verification are preserved. Rerunning invalidates earlier reset links.'
